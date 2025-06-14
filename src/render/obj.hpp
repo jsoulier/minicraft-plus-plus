@@ -4,11 +4,7 @@
 
 #include <cstdint>
 
-SDL_GPUShader* mppRenderLoadShader(SDL_GPUDevice* device, const char* name);
-SDL_GPUComputePipeline* mppRenderLoadComputeShader(SDL_GPUDevice* device, const char* name);
-SDL_GPUTexture* mppRenderLoadTexture(SDL_GPUDevice* device, SDL_GPUCopyPass* copyPass, const char* path);
-
-struct MppRenderMesh
+struct MppRenderObj
 {
     bool load(SDL_GPUDevice* device, SDL_GPUCopyPass* copyPass, const char* name);
     void free(SDL_GPUDevice* device);

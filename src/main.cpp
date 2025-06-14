@@ -1,7 +1,8 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-#include "renderer.hpp"
+#include <render/render.hpp>
+#include <util.hpp>
 
 int main(int argc, char** argv)
 {
@@ -10,13 +11,13 @@ int main(int argc, char** argv)
 
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
-        SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to initialize SDL: %s", SDL_GetError());
         return 1;
     }
 
-    if (!mppRendererInit())
+    if (!mppRenderInit())
     {
-        SDL_Log("Failed to initialize renderer: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to initialize render: %s", SDL_GetError());
         return 1;
     }
 
@@ -46,10 +47,10 @@ int main(int argc, char** argv)
             break;
         }
 
-        mppRendererSubmit();
+        mppRenderSubmit();
     }
 
-    mppRendererQuit();
+    mppRenderQuit();
     SDL_Quit();
 
     return 0;
