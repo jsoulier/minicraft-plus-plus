@@ -3,8 +3,12 @@
 
 #include <cstdint>
 
-#include "render_util.hpp"
+#include "dynamic_buffer.hpp"
 #include "renderer.hpp"
+#include "renderer_util.hpp"
+#include "util.hpp"
+#include "voxel.hpp"
+#include "voxel_model.hpp"
 
 static SDL_Window* window;
 static SDL_GPUDevice* device;
@@ -12,40 +16,33 @@ static TTF_TextEngine* textEngine;
 
 bool mppRendererInit()
 {
-    window = SDL_CreateWindow("Minicraft Plus Plus", 960, 720, SDL_WINDOW_RESIZABLE);
-    if (!window)
+    if (!(window = SDL_CreateWindow("Minicraft Plus Plus", 960, 720, SDL_WINDOW_RESIZABLE)))
     {
-        SDL_Log("Failed to create window: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to create window: %s", SDL_GetError());
         return false;
     }
 
-#ifndef NDEBUG
-    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, true, nullptr);
-#else
-    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, nullptr);
-#endif
-    if (!device)
+    if (!(device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, MPP_DEBUG, nullptr)))
     {
-        SDL_Log("Failed to create device: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to create device: %s", SDL_GetError());
         return false;
     }
 
     if (!SDL_ClaimWindowForGPUDevice(device, window))
     {
-        SDL_Log("Failed to create swapchain: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to create swapchain: %s", SDL_GetError());
         return false;
     }
 
     if (!TTF_Init())
     {
-        SDL_Log("Failed to initialize SDL ttf: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to initialize SDL ttf: %s", SDL_GetError());
         return false;
     }
-
-    textEngine = TTF_CreateGPUTextEngine(device);
-    if (!textEngine)
+    
+    if (!(textEngine = TTF_CreateGPUTextEngine(device)))
     {
-        SDL_Log("Failed to create text engine: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to create text engine: %s", SDL_GetError());
         return false;
     }
 
@@ -68,7 +65,7 @@ void mppRendererSubmit()
     SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(device);
     if (!commandBuffer)
     {
-        SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to acquire command buffer: %s", SDL_GetError());
         return;
     }
 
@@ -77,7 +74,7 @@ void mppRendererSubmit()
     SDL_GPUTexture* swapchainTexture;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, window, &swapchainTexture, &width, &height))
     {
-        SDL_Log("Failed to acquire swapchain texture: %s", SDL_GetError());
+        MPP_LOG_RELEASE("Failed to acquire swapchain texture: %s", SDL_GetError());
         SDL_CancelGPUCommandBuffer(commandBuffer);
         return;
     }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(mpp)
+project(minicraft++)
 
 set(BINARY_DIR ${CMAKE_BINARY_DIR}/bin)
 
@@ -19,27 +19,30 @@ add_subdirectory(lib/SDL_ttf)
 set(GLM_BUILD_LIBRARY OFF)
 add_subdirectory(lib/glm)
 
-add_executable(mpp WIN32
+add_executable(minicraft++ WIN32
     lib/fast_obj/fast_obj.c
     lib/sqlite3/sqlite3.c
     lib/stb/stb.c
 
+    src/dynamic_buffer.cpp
     src/main.cpp
-    src/render_util.cpp
     src/renderer.cpp
+    src/renderer_util.cpp
+    src/voxel.cpp
+    src/voxel_model.cpp
 )
 
-set_target_properties(mpp PROPERTIES CXX_STANDARD 20)
+set_target_properties(minicraft++ PROPERTIES CXX_STANDARD 20)
 
-target_include_directories(mpp PRIVATE lib/fast_obj)
-target_include_directories(mpp PRIVATE lib/jsmn)
-target_include_directories(mpp PRIVATE lib/sqlite3)
-target_include_directories(mpp PRIVATE lib/stb)
+target_include_directories(minicraft++ PRIVATE lib/fast_obj)
+target_include_directories(minicraft++ PRIVATE lib/jsmn)
+target_include_directories(minicraft++ PRIVATE lib/sqlite3)
+target_include_directories(minicraft++ PRIVATE lib/stb)
 
-target_link_libraries(mpp PRIVATE SDL3::SDL3)
-target_link_libraries(mpp PRIVATE SDL3_ttf::SDL3_ttf)
+target_link_libraries(minicraft++ PRIVATE SDL3::SDL3)
+target_link_libraries(minicraft++ PRIVATE SDL3_ttf::SDL3_ttf)
 
-target_link_libraries(mpp PRIVATE glm)
+target_link_libraries(minicraft++ PRIVATE glm)
 
 if(MSVC)
     set(SHADERCROSS lib/SDL_shadercross/msvc/shadercross.exe)
@@ -49,11 +52,11 @@ endif()
 
 function(add_shader FILE)
     set(DEPENDS ${ARGN})
-    set(GLSL ${CMAKE_SOURCE_DIR}/${FILE})
-    set(SPV ${CMAKE_SOURCE_DIR}/bin/${FILE}.spv)
-    set(DXIL ${CMAKE_SOURCE_DIR}/bin/${FILE}.dxil)
-    set(MSL ${CMAKE_SOURCE_DIR}/bin/${FILE}.msl)
-    set(JSON ${CMAKE_SOURCE_DIR}/bin/${FILE}.json)
+    set(GLSL ${CMAKE_SOURCE_DIR}/shaders/${FILE})
+    set(SPV ${CMAKE_SOURCE_DIR}/shaders/bin/${FILE}.spv)
+    set(DXIL ${CMAKE_SOURCE_DIR}/shaders/bin/${FILE}.dxil)
+    set(MSL ${CMAKE_SOURCE_DIR}/shaders/bin/${FILE}.msl)
+    set(JSON ${CMAKE_SOURCE_DIR}/shaders/bin/${FILE}.json)
 
     function(_add_shader PROGRAM SOURCE OUTPUT)
         if(MSVC)
@@ -78,7 +81,7 @@ function(add_shader FILE)
 
         string(REPLACE . _ NAME ${NAME})
         add_custom_target(${NAME} DEPENDS ${BINARY})
-        add_dependencies(particles ${NAME})
+        add_dependencies(minicraft++ ${NAME})
     endfunction()
 
     _add_shader(glslc ${GLSL} ${SPV})
@@ -86,3 +89,12 @@ function(add_shader FILE)
     _add_shader(${SHADERCROSS} ${SPV} ${MSL})
     _add_shader(${SHADERCROSS} ${SPV} ${JSON})
 endfunction()
+add_shader(voxel_model.frag shaders/voxel_model.glsl)
+add_shader(voxel_model.vert shaders/voxel_model.glsl)
+
+function(add_model NAME)
+    configure_file(models/${NAME}.obj ${BINARY_DIR}/${NAME}.obj COPYONLY)
+    # configure_file(models/${NAME}.mtl ${BINARY_DIR}/${NAME}.mtl COPYONLY)
+    configure_file(models/${NAME}.png ${BINARY_DIR}/${NAME}.png COPYONLY)
+endfunction()
+add_model(player)
