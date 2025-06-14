@@ -26,6 +26,7 @@ add_executable(mpp WIN32
 
     src/main.cpp
     src/render_util.cpp
+    src/renderer.cpp
 )
 
 set_target_properties(mpp PROPERTIES CXX_STANDARD 20)
@@ -81,7 +82,7 @@ function(add_shader FILE)
     endfunction()
 
     _add_shader(glslc ${GLSL} ${SPV})
-    _add_shader(${SHADERCROSS} ${SPV} ${DXIL})
+    # _add_shader(${SHADERCROSS} ${SPV} ${DXIL})
     _add_shader(${SHADERCROSS} ${SPV} ${MSL})
     _add_shader(${SHADERCROSS} ${SPV} ${JSON})
 endfunction()

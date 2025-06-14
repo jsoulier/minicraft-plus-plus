@@ -1,6 +1,8 @@
 #include <SDL3/SDL.h>
 
+#include <fast_obj.h>
 #include <jsmn.h>
+#include <stb_image.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -53,14 +55,14 @@ SDL_GPUShader* mppRenderLoadShader(SDL_GPUDevice* device, const char* name)
     if (!shaderData)
     {
         SDL_Log("Failed to load shader: %s", shaderPath);
-        return NULL;
+        return nullptr;
     }
 
     char* shaderJsonData = static_cast<char*>(SDL_LoadFile(shaderJsonPath, &shaderJsonSize));
     if (!shaderJsonData)
     {
         SDL_Log("Failed to load shader json: %s", shaderJsonPath);
-        return NULL;
+        return nullptr;
     }
 
     jsmn_parser jsonParser;
@@ -70,17 +72,17 @@ SDL_GPUShader* mppRenderLoadShader(SDL_GPUDevice* device, const char* name)
     if (jsmn_parse(&jsonParser, shaderJsonData, shaderJsonSize, jsonTokens, 9) <= 0)
     {
         SDL_Log("Failed to parse json: %s", shaderJsonPath);
-        return NULL;
+        return nullptr;
     }
 
-    SDL_GPUShaderCreateInfo info = {0};
+    SDL_GPUShaderCreateInfo info{};
 
     for (int i = 1; i < 9; i += 2)
     {
         if (jsonTokens[i].type != JSMN_STRING)
         {
             SDL_Log("Bad json type: %s", shaderJsonPath);
-            return NULL;
+            return nullptr;
         }
 
         char* keyString = shaderJsonData + jsonTokens[i + 0].start;
@@ -132,7 +134,7 @@ SDL_GPUShader* mppRenderLoadShader(SDL_GPUDevice* device, const char* name)
     if (!shader)
     {
         SDL_Log("Failed to create shader: %s", SDL_GetError());
-        return NULL;
+        return nullptr;
     }
 
     SDL_free(shaderData);
@@ -185,14 +187,14 @@ SDL_GPUComputePipeline* mppRenderLoadComputeShader(SDL_GPUDevice* device, const 
     if (!shaderData)
     {
         SDL_Log("Failed to load shader: %s", shaderPath);
-        return NULL;
+        return nullptr;
     }
 
     char* shaderJsonData = static_cast<char*>(SDL_LoadFile(shaderJsonPath, &shaderJsonSize));
     if (!shaderJsonData)
     {
         SDL_Log("Failed to load shader json: %s", shaderJsonPath);
-        return NULL;
+        return nullptr;
     }
 
     jsmn_parser jsonParser;
@@ -202,17 +204,17 @@ SDL_GPUComputePipeline* mppRenderLoadComputeShader(SDL_GPUDevice* device, const 
     if (jsmn_parse(&jsonParser, shaderJsonData, shaderJsonSize, jsonTokens, 19) <= 0)
     {
         SDL_Log("Failed to parse json: %s", shaderJsonPath);
-        return NULL;
+        return nullptr;
     }
 
-    SDL_GPUComputePipelineCreateInfo info = {0};
+    SDL_GPUComputePipelineCreateInfo info{};
 
     for (int i = 1; i < 19; i += 2)
     {
         if (jsonTokens[i].type != JSMN_STRING)
         {
             SDL_Log("Bad json type: %s", shaderJsonPath);
-            return NULL;
+            return nullptr;
         }
 
         char* keyString = shaderJsonData + jsonTokens[i + 0].start;
@@ -275,11 +277,94 @@ SDL_GPUComputePipeline* mppRenderLoadComputeShader(SDL_GPUDevice* device, const 
     if (!pipeline)
     {
         SDL_Log("Failed to create compute pipeline: %s", SDL_GetError());
-        return NULL;
+        return nullptr;
     }
         
     SDL_free(shaderData);
     SDL_free(shaderJsonData);
 
     return pipeline;
+}
+
+SDL_GPUTexture* mppRenderLoadTexture(SDL_GPUDevice* device, SDL_GPUCopyPass* copyPass, const char* path)
+{
+    /* TODO: fix leaks on error */
+
+    int channels;
+    int width;
+    int height;
+
+    void* srcData = stbi_load(path, &width, &height, &channels, 4);
+    if (!srcData)
+    {
+        SDL_Log("Failed to load image: %s, %s", path, stbi_failure_reason());
+        return nullptr;
+    }
+
+    SDL_GPUTransferBuffer* transferBuffer;
+    SDL_GPUTexture* texture;
+
+    {
+        SDL_GPUTransferBufferCreateInfo info{};
+        info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        info.size = width * height * 4;
+        transferBuffer = SDL_CreateGPUTransferBuffer(device, &info);
+        if (!transferBuffer)
+        {
+            SDL_Log("Failed to create transfer buffer: %s", SDL_GetError());
+            return nullptr;
+        }
+    }
+
+    void* dstData = SDL_MapGPUTransferBuffer(device, transferBuffer, false);
+    if (!dstData)
+    {
+        SDL_Log("Failed to map transfer buffer: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    memcpy(dstData, srcData, width * height * 4);
+    stbi_image_free(srcData);
+
+    SDL_UnmapGPUTransferBuffer(device, transferBuffer);
+
+    {
+        SDL_GPUTextureCreateInfo info{};
+
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+
+        info.num_levels = 1;
+
+        texture = SDL_CreateGPUTexture(device, &info);
+        if (!texture)
+        {
+            SDL_Log("Failed to create texture: %s", SDL_GetError());
+            return nullptr;
+        }
+
+        SDL_DestroyProperties(info.props);
+    }
+
+    {
+        SDL_GPUTextureTransferInfo info{};
+        info.transfer_buffer = transferBuffer;
+
+        SDL_GPUTextureRegion region{};
+        region.texture = texture;
+        region.w = width;
+        region.h = height;
+        region.d = 1;
+
+        SDL_UploadToGPUTexture(copyPass, &info, &region, false);
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+
+    return texture;
 }
