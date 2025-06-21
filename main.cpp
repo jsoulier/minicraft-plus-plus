@@ -67,6 +67,36 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     mppRendererDraw("testing", 128, 32, Red, 6);
     mppRendererDraw("testing", 64, 32, Green, 6);
     mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
+    mppRendererDraw("testing", 192, 32, Blue, 6);
 
     mppLevelRender();
 

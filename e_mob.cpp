@@ -5,7 +5,7 @@
 #include "e_mob.hpp"
 #include "renderer.hpp"
 
-static constexpr float Speed = 0.1f;
+static constexpr float Speed = 0.05f;
 
 /* TODO: add some virtual functions to fetch the sprites */
 static constexpr uint64_t Sprite = mppRendererCreateSprite(Red, Green, Blue, Yellow, 0, 0, 16);
@@ -16,6 +16,8 @@ void MppEntityMob::render()
     mppRendererDraw("here", x + 0.5f, y + 0.5f, Black, 6);
     mppRendererDraw("here", x, y, Gray, 6);
     mppRendererDraw("here", x - 0.5f, y - 0.5f, White, 6);
+
+    mppRendererSetCamera(Sprite, x, y);
 }
 
 void MppEntityMob::update(uint64_t dt, uint64_t time)
@@ -32,6 +34,6 @@ void MppEntityMob::update(uint64_t dt, uint64_t time)
     }
 
     float speed = getSpeed();
-    x += dx * Speed * speed * dt;
-    y += dy * Speed * speed * dt;
+    x += dx * Speed * speed * dt / length;
+    y += dy * Speed * speed * dt / length;
 }

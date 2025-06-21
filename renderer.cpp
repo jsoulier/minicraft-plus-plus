@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <string_view>
 #include <unordered_map>
 
 static constexpr const char* Title = "Minicraft Plus Plus";
@@ -17,10 +18,12 @@ static constexpr const char* Font = "RasterForgeRegular.ttf";
 static constexpr int FontResolution = 4;
 
 static constexpr auto Presentation = SDL_LOGICAL_PRESENTATION_LETTERBOX;
-static constexpr bool VSync = true;
+static constexpr int VSync = 1;
 static constexpr auto Flash = SDL_FLASH_BRIEFLY;
 static constexpr auto PixelFormat = SDL_PIXELFORMAT_INDEX8;
 static constexpr auto BlendMode = SDL_BLENDMODE_BLEND;
+static constexpr const char* LowPower = "1";
+static constexpr const char* Driver = nullptr;
 
 /* TODO: why does PIXELART look like linear filtering */
 static constexpr auto ScaleMode = SDL_SCALEMODE_NEAREST;
@@ -35,6 +38,10 @@ static SDL_Palette* palette;
 static std::unordered_map<uint64_t, SDL_Surface*> spriteSurfaces;
 static std::unordered_map<uint64_t, SDL_Texture*> spriteTextures;
 static std::unordered_map<int, TTF_Font*> fonts;
+static std::unordered_map<uint64_t, SDL_Texture*> fontTextures;
+
+static float cameraX;
+static float cameraY;
 
 /**
  * colors have 6 values per channel
@@ -110,6 +117,9 @@ static bool initSDL()
         SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
         return false;
     }
+
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, Driver);
+    SDL_SetHint(SDL_HINT_RENDER_GPU_LOW_POWER, LowPower);
 
     window = SDL_CreateWindow(Title, 960, 720, SDL_WINDOW_HIDDEN);
     if (!window)
@@ -213,9 +223,15 @@ static void freeMaps()
         TTF_CloseFont(font);
     }
 
+    for (auto& [hash, texture] : fontTextures)
+    {
+        SDL_DestroyTexture(texture);
+    }
+
     spriteSurfaces.clear();
     spriteTextures.clear();
     fonts.clear();
+    fontTextures.clear();
 }
 
 void mppRendererQuit()
@@ -243,6 +259,14 @@ void mppRendererClear()
 void mppRendererPresent()
 {
     SDL_RenderPresent(renderer);
+}
+
+void mppRendererSetCamera(uint64_t sprite, float x, float y)
+{
+    uint64_t size = getSpriteSize(sprite);
+
+    cameraX = x - Width / 2;
+    cameraY = y - Height / 2;
 }
 
 static SDL_Surface* createSpriteSurface(uint64_t sprite)
@@ -321,15 +345,50 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
     uint64_t size = getSpriteSize(sprite);
 
     SDL_FRect rect;
-    rect.x = x - size / 2;
-    rect.y = y - size / 2;
+    rect.x = x - size / 2 - cameraX;
+    rect.y = y - size / 2 - cameraY;
     rect.w = size;
     rect.h = size;
 
     SDL_RenderTexture(renderer, texture->second, nullptr, &rect);
 }
 
-void mppRendererDraw(const char* text, float x, float y, int inColor, int size)
+static uint64_t getFontTextureHash(const char* text, int color, int size)
+{
+    /* TODO: collisions */
+
+    uint64_t hash = 0;
+
+    hash |= std::hash<std::string_view>{}(text);
+    hash ^= std::hash<int>{}(color);
+    hash ^= std::hash<int>{}(size);
+
+    return hash;
+}
+
+static SDL_Texture* createFontTexture(const char* text, float x, float y, int inColor, TTF_Font* font)
+{
+    SDL_Color color = getColor(inColor);
+
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text, 0, color);
+    if (!surface)
+    {
+        SDL_Log("Failed to create surface: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_DestroySurface(surface);
+    if (!texture)
+    {
+        SDL_Log("Failed to create texture: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    return texture;
+}
+
+void mppRendererDraw(const char* text, float x, float y, int color, int size)
 {
     /* TODO: refactor */
 
@@ -350,30 +409,24 @@ void mppRendererDraw(const char* text, float x, float y, int inColor, int size)
         return;
     }
 
-    SDL_Color color = getColor(inColor);
+    uint64_t textureHash = getFontTextureHash(text, color, size);
 
-    SDL_Surface* surface = TTF_RenderText_Blended(font->second, text, 0, color);
-    if (!surface)
+    auto texture = fontTextures.find(textureHash);
+    if (texture == fontTextures.end())
     {
-        SDL_Log("Failed to create surface: %s", SDL_GetError());
-        return;
+        SDL_Texture* texturePtr = createFontTexture(text, x, y, color, font->second);
+        texture = fontTextures.emplace(textureHash, texturePtr).first;
     }
-
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (!texture)
+    if (!texture->second)
     {
-        SDL_DestroySurface(surface);
-        SDL_Log("Failed to create texture: %s", SDL_GetError());
         return;
     }
 
     SDL_FRect rect;
-    rect.w = (surface->w) / FontResolution;
-    rect.h = (surface->h) / FontResolution;
-    rect.x = x - rect.w / 2;
-    rect.y = y - rect.h / 2;
+    rect.w = (texture->second->w) / FontResolution;
+    rect.h = (texture->second->h) / FontResolution;
+    rect.x = x - rect.w / 2 - cameraX;
+    rect.y = y - rect.h / 2 - cameraY;
 
-    SDL_RenderTexture(renderer, texture, nullptr, &rect);
-    SDL_DestroyTexture(texture);
-    SDL_DestroySurface(surface);
+    SDL_RenderTexture(renderer, texture->second, nullptr, &rect);
 }
