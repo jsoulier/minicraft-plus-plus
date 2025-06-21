@@ -23,7 +23,7 @@ void MppEntityPlayer::move(int& dx, int& dy) const
     }
 }
 
-MppEntityType MppEntityPlayer::getType() const
+int MppEntityPlayer::getType() const
 {
     return MppEntityTypePlayer;
 }

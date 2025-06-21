@@ -7,10 +7,41 @@
 #include "entity.hpp"
 
 MppEntity::MppEntity()
-    : x{0.0f}
+    : id{-1}
+    , x{0.0f}
     , y{0.0f} {}
 
-std::shared_ptr<MppEntity> mppEntityCreate(MppEntityType type, void* args)
+int64_t MppEntity::getId() const
+{
+    return id;
+}
+
+float MppEntity::getX() const
+{
+    return x;
+}
+
+float MppEntity::getY() const
+{
+    return y;
+}
+
+void MppEntity::setId(int64_t id)
+{
+    this->id = id;
+}
+
+void MppEntity::setX(float x)
+{
+    this->x = x;
+}
+
+void MppEntity::setY(float y)
+{
+    this->y = y;
+}
+
+std::shared_ptr<MppEntity> mppEntityCreate(int type, void* args)
 {
     std::shared_ptr<MppEntity> entity;
 

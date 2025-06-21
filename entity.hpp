@@ -3,22 +3,31 @@
 #include <cstdint>
 #include <memory>
 
-enum MppEntityType
-{
-    MppEntityTypePlayer,
-};
+static constexpr int MppEntityTypePlayer = 0;
 
 class MppEntity
 {
 public:
     MppEntity();
+
     virtual void render() = 0;
     virtual void update(uint64_t dt) = 0;
-    virtual MppEntityType getType() const = 0;
+
+    virtual void serialize() {}
+    virtual int getType() const = 0;
+
+    int64_t getId() const;
+    float getX() const;
+    float getY() const;
+
+    void setId(int64_t id);
+    void setX(float x);
+    void setY(float y);
 
 protected:
+    int64_t id;
     float x;
     float y;
 };
 
-std::shared_ptr<MppEntity> mppEntityCreate(MppEntityType type, void* args = nullptr);
+std::shared_ptr<MppEntity> mppEntityCreate(int type, void* args = nullptr);

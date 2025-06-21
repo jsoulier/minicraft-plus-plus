@@ -35,11 +35,13 @@ add_subdirectory(SDL_image)
 add_subdirectory(SDL_ttf)
 
 add_executable(minicraft++ WIN32
+    database.cpp
     e_mob.cpp
     e_player.cpp
     entity.cpp
     main.cpp
     renderer.cpp
+    sqlite3.c
 )
 
 set_target_properties(minicraft++ PROPERTIES CXX_STANDARD 23)

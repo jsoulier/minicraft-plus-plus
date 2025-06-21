@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "database.hpp"
 #include "renderer.hpp"
 #include "entity.hpp"
 
@@ -21,16 +22,30 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
         return SDL_APP_FAILURE;
     }
 
+    bool hasDatabase = mppDatabaseInit();
+
     t2 = SDL_GetTicks();
     t1 = t2;
 
-    player = mppEntityCreate(MppEntityTypePlayer);
+    if (hasDatabase)
+    {
+        mppDatabaseSelect([&](std::shared_ptr<MppEntity>& entity, int level)
+        {
+            player = entity;
+        });
+    }
+
+    if (!player)
+    {
+        player = mppEntityCreate(MppEntityTypePlayer);
+    }
 
     return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result)
 {
+    mppDatabaseQuit();
     mppRendererQuit();
 }
 
@@ -41,6 +56,8 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     t1 = t2;
 
     player->update(dt);
+
+    mppDatabaseInsert(player, 0);
 
     uint64_t sprite1 = mppRendererCreateSprite(Red, Green, Blue, Magenta, 0, 0, 16);
     uint64_t sprite2 = mppRendererCreateSprite(Red, Green, Blue, Magenta, 16, 0, 16);
