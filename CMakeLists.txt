@@ -35,6 +35,9 @@ add_subdirectory(SDL_image)
 add_subdirectory(SDL_ttf)
 
 add_executable(minicraft++ WIN32
+    e_mob.cpp
+    e_player.cpp
+    entity.cpp
     main.cpp
     renderer.cpp
 )

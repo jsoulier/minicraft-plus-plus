@@ -58,44 +58,6 @@ static SDL_Color getColor(uint64_t inColor)
     return color;
 }
 
-/**
- * 00-09: color1
- * 10-19: color2
- * 20-29: color3
- * 30-39: color4
- * 40-48: x
- * 49-57: y
- * 58-61: size
- * 62-63: unused
- */
-uint64_t mppRendererCreateSprite(
-    uint64_t color1,
-    uint64_t color2,
-    uint64_t color3,
-    uint64_t color4,
-    uint64_t x,
-    uint64_t y,
-    uint64_t size)
-{
-    assert(color1 < 1024);
-    assert(color2 < 1024);
-    assert(color3 < 1024);
-    assert(color4 < 1024);
-    assert(x < 256);
-    assert(y < 256);
-    assert(size > 0 && size <= 16);
-
-    uint64_t sprite = 0;
-    sprite |= color1 << 0;
-    sprite |= color2 << 10;
-    sprite |= color3 << 20;
-    sprite |= color4 << 30;
-    sprite |= x << 40;
-    sprite |= y << 49;
-    sprite |= (size - 1) << 58;
-    return sprite;
-}
-
 static uint64_t getSpriteSurfaceHash(uint64_t sprite)
 {
     return (sprite >> 40) & 0x3FFFFF;
@@ -359,8 +321,8 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
     uint64_t size = getSpriteSize(sprite);
 
     SDL_FRect rect;
-    rect.x = x;
-    rect.y = y;
+    rect.x = x - size / 2;
+    rect.y = y - size / 2;
     rect.w = size;
     rect.h = size;
 
