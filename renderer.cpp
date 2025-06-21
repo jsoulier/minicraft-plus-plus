@@ -2,20 +2,28 @@
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <cassert>
 #include <cstdint>
 #include <unordered_map>
 
 static constexpr const char* Title = "Minicraft Plus Plus";
 static constexpr int Width = 256;
 static constexpr int Height = 144;
+
 static constexpr const char* Spritesheet = "spritesheet.png";
+
+/* TODO: fonts have to be rendered at a very high resolution to avoid aliasing */
 static constexpr const char* Font = "RasterForgeRegular.ttf";
+static constexpr int FontResolution = 4;
+
 static constexpr auto Presentation = SDL_LOGICAL_PRESENTATION_LETTERBOX;
 static constexpr bool VSync = true;
 static constexpr auto Flash = SDL_FLASH_BRIEFLY;
 static constexpr auto PixelFormat = SDL_PIXELFORMAT_INDEX8;
-static constexpr auto ScaleMode = SDL_SCALEMODE_NEAREST;
 static constexpr auto BlendMode = SDL_BLENDMODE_BLEND;
+
+/* TODO: why does PIXELART look like linear filtering */
+static constexpr auto ScaleMode = SDL_SCALEMODE_NEAREST;
 
 static SDL_Window* window;
 static SDL_Renderer* renderer;
@@ -23,8 +31,32 @@ static TTF_TextEngine* textEngine;
 static SDL_Surface* spritesheet;
 static SDL_Palette* palette;
 
+/* TODO: waiting for MSVC to support std::flat_map */
 static std::unordered_map<uint64_t, SDL_Surface*> spriteSurfaces;
 static std::unordered_map<uint64_t, SDL_Texture*> spriteTextures;
+static std::unordered_map<int, TTF_Font*> fonts;
+
+/**
+ * colors have 6 values per channel
+ * e.g. for 512, red is 5, green is 1, blue is 2
+ */
+static SDL_Color getColor(uint64_t inColor)
+{
+    Uint8 red = (inColor / 100) % 10;
+    Uint8 green = (inColor / 10) % 10;
+    Uint8 blue = inColor % 10;
+
+    assert(red >= 0 && red <= 5);
+    assert(green >= 0 && green <= 5);
+    assert(blue >= 0 && blue <= 5);
+
+    SDL_Color color;
+    color.r = red * 255 / 5;
+    color.g = green * 255 / 5;
+    color.b = blue * 255 / 5;
+    color.a = 255;
+    return color;
+}
 
 /**
  * 00-09: color1
@@ -45,13 +77,13 @@ uint64_t mppRendererCreateSprite(
     uint64_t y,
     uint64_t size)
 {
-    SDL_assert(color1 < 1024);
-    SDL_assert(color2 < 1024);
-    SDL_assert(color3 < 1024);
-    SDL_assert(color4 < 1024);
-    SDL_assert(x < 256);
-    SDL_assert(y < 256);
-    SDL_assert(size > 0 && size <= 16);
+    assert(color1 < 1024);
+    assert(color2 < 1024);
+    assert(color3 < 1024);
+    assert(color4 < 1024);
+    assert(x < 256);
+    assert(y < 256);
+    assert(size > 0 && size <= 16);
 
     uint64_t sprite = 0;
     sprite |= color1 << 0;
@@ -74,42 +106,24 @@ static uint64_t getSpriteTextureHash(uint64_t sprite)
     return sprite;
 }
 
-static SDL_Color getSpriteColor(uint64_t inColor)
-{
-    Uint8 red = (inColor / 100) % 10;
-    Uint8 green = (inColor / 10) % 10;
-    Uint8 blue = inColor % 10;
-
-    SDL_assert(red >= 0 && red <= 7);
-    SDL_assert(green >= 0 && green <= 7);
-    SDL_assert(blue >= 0 && blue <= 7);
-
-    SDL_Color color;
-    color.r = red * 255 / 7;
-    color.g = green * 255 / 7;
-    color.b = blue * 255 / 7;
-    color.a = 255;
-    return color;
-}
-
 static SDL_Color getSpriteColor1(uint64_t sprite)
 {
-    return getSpriteColor((sprite >> 0) & 0x3FF);
+    return getColor((sprite >> 0) & 0x3FF);
 }
 
 static SDL_Color getSpriteColor2(uint64_t sprite)
 {
-    return getSpriteColor((sprite >> 10) & 0x3FF);
+    return getColor((sprite >> 10) & 0x3FF);
 }
 
 static SDL_Color getSpriteColor3(uint64_t sprite)
 {
-    return getSpriteColor((sprite >> 20) & 0x3FF);
+    return getColor((sprite >> 20) & 0x3FF);
 }
 
 static SDL_Color getSpriteColor4(uint64_t sprite)
 {
-    return getSpriteColor((sprite >> 30) & 0x3FF);
+    return getColor((sprite >> 30) & 0x3FF);
 }
 
 static uint64_t getSpriteX(uint64_t sprite)
@@ -175,8 +189,6 @@ static bool initTTF()
         return false;
     }
 
-    /* TODO: fonts */
-
     return true;
 }
 
@@ -222,7 +234,7 @@ bool mppRendererInit()
     return true;
 }
 
-static void destroySprites()
+static void freeMaps()
 {
     for (auto& [sprite, surface] : spriteSurfaces)
     {
@@ -234,18 +246,24 @@ static void destroySprites()
         SDL_DestroyTexture(texture);
     }
 
+    for (auto& [size, font] : fonts)
+    {
+        TTF_CloseFont(font);
+    }
+
     spriteSurfaces.clear();
     spriteTextures.clear();
-
-    SDL_DestroySurface(spritesheet);
-    SDL_DestroyPalette(palette);
+    fonts.clear();
 }
 
 void mppRendererQuit()
 {
     SDL_HideWindow(window);
 
-    destroySprites();
+    freeMaps();
+
+    SDL_DestroySurface(spritesheet);
+    SDL_DestroyPalette(palette);
 
     TTF_DestroyRendererTextEngine(textEngine);
     SDL_DestroyRenderer(renderer);
@@ -319,8 +337,8 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
     auto surface = spriteSurfaces.find(surfaceHash);
     if (surface == spriteSurfaces.end())
     {
-        SDL_Surface* spriteSurface = createSpriteSurface(sprite);
-        surface = spriteSurfaces.emplace(surfaceHash, spriteSurface).first;
+        SDL_Surface* surfacePtr = createSpriteSurface(sprite);
+        surface = spriteSurfaces.emplace(surfaceHash, surfacePtr).first;
     }
     if (!surface->second)
     {
@@ -330,8 +348,8 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
     auto texture = spriteTextures.find(textureHash);
     if (texture == spriteTextures.end())
     {
-        SDL_Texture* spriteTexture = createSpriteTexture(sprite, surface->second);
-        texture = spriteTextures.emplace(textureHash, spriteTexture).first;
+        SDL_Texture* texturePtr = createSpriteTexture(sprite, surface->second);
+        texture = spriteTextures.emplace(textureHash, texturePtr).first;
     }
     if (!texture->second)
     {
@@ -347,4 +365,53 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
     rect.h = size;
 
     SDL_RenderTexture(renderer, texture->second, nullptr, &rect);
+}
+
+void mppRendererDraw(const char* text, float x, float y, int inColor, int size)
+{
+    /* TODO: refactor (should cache the way sprites do) */
+
+    size *= FontResolution;
+
+    auto font = fonts.find(size);
+    if (font == fonts.end())
+    {
+        TTF_Font* fontPtr = TTF_OpenFont(Font, size);
+        if (!fontPtr)
+        {
+            SDL_Log("Failed to open font: %s", SDL_GetError());
+        }
+        font = fonts.emplace(size, fontPtr).first;
+    }
+    if (!font->second)
+    {
+        return;
+    }
+
+    SDL_Color color = getColor(inColor);
+
+    SDL_Surface* surface = TTF_RenderText_Blended(font->second, text, 0, color);
+    if (!surface)
+    {
+        SDL_Log("Failed to create surface: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture)
+    {
+        SDL_DestroySurface(surface);
+        SDL_Log("Failed to create texture: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_FRect rect;
+    rect.w = (surface->w) / FontResolution;
+    rect.h = (surface->h) / FontResolution;
+    rect.x = x - rect.w / 2;
+    rect.y = y - rect.h / 2;
+
+    SDL_RenderTexture(renderer, texture, nullptr, &rect);
+    SDL_DestroyTexture(texture);
+    SDL_DestroySurface(surface);
 }
