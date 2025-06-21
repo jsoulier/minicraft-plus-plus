@@ -1,5 +1,9 @@
 #include <SDL3/SDL.h>
 
+#include <cstdint>
+#include <functional>
+#include <memory>
+
 #include "database.hpp"
 #include "entity.hpp"
 #include "sqlite3.h"
@@ -7,14 +11,20 @@
 static constexpr const char* SaveFile = "minicraft++.sqlite3";
 
 static sqlite3* handle;
+static sqlite3_stmt* getTimeStmt;
+static sqlite3_stmt* setTimeStmt;
 static sqlite3_stmt* insertEntityStmt;
 static sqlite3_stmt* updateEntityStmt;
-static sqlite3_stmt* selectEntityStmt;
+static sqlite3_stmt* selectEntitiesStmt;
 
 static bool createTables()
 {
     const char* tablesSQL =
-        "CREATE TABLE IF NOT EXISTS entity ("
+        "CREATE TABLE IF NOT EXISTS header ("
+        "    id INTEGER PRIMARY KEY,"
+        "    time INTEGER NOT NULL"
+        ");"
+        "CREATE TABLE IF NOT EXISTS entities ("
         "    type INTEGER NOT NULL,"
         "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "    x FLOAT NOT NULL,"
@@ -32,10 +42,33 @@ static bool createTables()
     return true;
 }
 
+static bool createHeaderStatements()
+{
+    const char* setTimeSQL =
+        "INSERT OR REPLACE INTO header (id, time) VALUES (?, ?);";
+
+    if (sqlite3_prepare_v2(handle, setTimeSQL, -1, &setTimeStmt, 0) != SQLITE_OK)
+    {
+        SDL_Log("Failed to prepare set time: %s", sqlite3_errmsg(handle));
+        return false;
+    }
+
+    const char* getTimeSQL =
+        "SELECT time FROM header WHERE id = ?;";
+
+    if (sqlite3_prepare_v2(handle, getTimeSQL, -1, &getTimeStmt, 0) != SQLITE_OK)
+    {
+        SDL_Log("Failed to prepare get time: %s", sqlite3_errmsg(handle));
+        return false;
+    }
+
+    return true;
+}
+
 static bool createEntityStatements()
 {
     const char* insertEntitySQL =
-        "INSERT INTO entity (type, x, y, level, data) VALUES (?, ?, ?, ?, ?);";
+        "INSERT INTO entities (type, x, y, level, data) VALUES (?, ?, ?, ?, ?);";
 
     if (sqlite3_prepare_v2(handle, insertEntitySQL, -1, &insertEntityStmt, 0) != SQLITE_OK)
     {
@@ -44,7 +77,7 @@ static bool createEntityStatements()
     }
 
     const char* updateEntitySQL =
-        "UPDATE entity SET x = ?, y = ?, level = ?, data = ? WHERE id = ?;";
+        "UPDATE entities SET x = ?, y = ?, level = ?, data = ? WHERE id = ?;";
 
     if (sqlite3_prepare_v2(handle, updateEntitySQL, -1, &updateEntityStmt, 0) != SQLITE_OK)
     {
@@ -52,12 +85,12 @@ static bool createEntityStatements()
         return false;
     }
 
-    const char* selectEntitySQL =
-        "SELECT * FROM entity;";
+    const char* selectEntitiesSQL =
+        "SELECT * FROM entities;";
 
-    if (sqlite3_prepare_v2(handle, selectEntitySQL, -1, &selectEntityStmt, 0) != SQLITE_OK)
+    if (sqlite3_prepare_v2(handle, selectEntitiesSQL, -1, &selectEntitiesStmt, 0) != SQLITE_OK)
     {
-        SDL_Log("Failed to prepare select entity: %s", sqlite3_errmsg(handle));
+        SDL_Log("Failed to prepare select entities: %s", sqlite3_errmsg(handle));
         return false;
     }
 
@@ -77,6 +110,12 @@ bool mppDatabaseInit()
     if (!createTables())
     {
         SDL_Log("Failed to create tables");
+        return false;
+    }
+
+    if (!createHeaderStatements())
+    {
+        SDL_Log("Failed to create header statements");
         return false;
     }
 
@@ -100,9 +139,12 @@ void mppDatabaseQuit()
 
     sqlite3_exec(handle, "COMMIT;", 0, 0, 0);
 
+    sqlite3_finalize(setTimeStmt);
+    sqlite3_finalize(getTimeStmt);
+
     sqlite3_finalize(insertEntityStmt);
     sqlite3_finalize(updateEntityStmt);
-    sqlite3_finalize(selectEntityStmt);
+    sqlite3_finalize(selectEntitiesStmt);
 
     sqlite3_close(handle);
 }
@@ -117,12 +159,51 @@ void mppDatabaseCommit()
     sqlite3_exec(handle, "COMMIT; BEGIN;", 0, 0, 0);
 }
 
-static void insertEntity(std::shared_ptr<MppEntity>& entity, int level)
+void mppDatabaseSetTime(int64_t time)
+{
+    if (!handle)
+    {
+        return;
+    }
+
+    sqlite3_bind_int(setTimeStmt, 1, 0);
+    sqlite3_bind_int64(setTimeStmt, 2, time);
+
+    if (sqlite3_step(setTimeStmt) != SQLITE_DONE)
+    {
+        SDL_Log("Failed to set time: %s", sqlite3_errmsg(handle));
+    }
+
+    sqlite3_reset(setTimeStmt);
+}
+
+int64_t mppDatabaseGetTime()
+{
+    if (!handle)
+    {
+        return 0;
+    }
+
+    sqlite3_bind_int(getTimeStmt, 1, 0);
+
+    if (sqlite3_step(getTimeStmt) != SQLITE_ROW)
+    {
+        return 0;
+    }
+
+    int64_t time = sqlite3_column_int64(getTimeStmt, 0);
+
+    sqlite3_reset(getTimeStmt);
+
+    return time;
+}
+
+static void insertEntity(std::shared_ptr<MppEntity>& entity)
 {
     sqlite3_bind_int(insertEntityStmt, 1, entity->getType());
     sqlite3_bind_double(insertEntityStmt, 2, entity->getX());
     sqlite3_bind_double(insertEntityStmt, 3, entity->getY());
-    sqlite3_bind_double(insertEntityStmt, 4, level);
+    sqlite3_bind_double(insertEntityStmt, 4, entity->getLevel());
     sqlite3_bind_null(insertEntityStmt, 5);
 
     /* TODO: blob */
@@ -139,11 +220,11 @@ static void insertEntity(std::shared_ptr<MppEntity>& entity, int level)
     sqlite3_reset(insertEntityStmt);
 }
 
-static void updateEntity(std::shared_ptr<MppEntity>& entity, int level)
+static void updateEntity(std::shared_ptr<MppEntity>& entity)
 {
     sqlite3_bind_double(updateEntityStmt, 1, entity->getX());
     sqlite3_bind_double(updateEntityStmt, 2, entity->getY());
-    sqlite3_bind_int(updateEntityStmt, 3, level);
+    sqlite3_bind_int(updateEntityStmt, 3, entity->getLevel());
     sqlite3_bind_null(updateEntityStmt, 4);
     sqlite3_bind_int64(updateEntityStmt, 5, entity->getId());
 
@@ -158,7 +239,7 @@ static void updateEntity(std::shared_ptr<MppEntity>& entity, int level)
     sqlite3_reset(updateEntityStmt);
 }
 
-void mppDatabaseInsert(std::shared_ptr<MppEntity>& entity, int level)
+void mppDatabaseInsert(std::shared_ptr<MppEntity>& entity)
 {
     if (!handle)
     {
@@ -167,17 +248,17 @@ void mppDatabaseInsert(std::shared_ptr<MppEntity>& entity, int level)
 
     if (entity->getId() == -1)
     {
-        insertEntity(entity, level);
+        insertEntity(entity);
     }
     else
     {
-        updateEntity(entity, level);
+        updateEntity(entity);
     }
 }
 
-static void selectEntity(const std::function<void(std::shared_ptr<MppEntity>&, int)>& function)
+static void selectEntity(const std::function<void(std::shared_ptr<MppEntity>&)>& function)
 {
-    int type = sqlite3_column_int(selectEntityStmt, 0);
+    int type = sqlite3_column_int(selectEntitiesStmt, 0);
 
     std::shared_ptr<MppEntity> entity = mppEntityCreate(type);
     if (!entity)
@@ -186,28 +267,27 @@ static void selectEntity(const std::function<void(std::shared_ptr<MppEntity>&, i
         return;
     }
 
-    entity->setId(sqlite3_column_int64(selectEntityStmt, 1));
-    entity->setX(sqlite3_column_double(selectEntityStmt, 2));
-    entity->setY(sqlite3_column_double(selectEntityStmt, 3));
-
-    int level = sqlite3_column_int(selectEntityStmt, 4);
+    entity->setId(sqlite3_column_int64(selectEntitiesStmt, 1));
+    entity->setX(sqlite3_column_double(selectEntitiesStmt, 2));
+    entity->setY(sqlite3_column_double(selectEntitiesStmt, 3));
+    entity->setLevel(sqlite3_column_int(selectEntitiesStmt, 4));
 
     /* TODO: blob */
 
-    function(entity, level);
+    function(entity);
 }
 
-void mppDatabaseSelect(const std::function<void(std::shared_ptr<MppEntity>&, int)>& function)
+void mppDatabaseSelect(const std::function<void(std::shared_ptr<MppEntity>&)>& function)
 {
     if (!handle)
     {
         return;
     }
 
-    while (sqlite3_step(selectEntityStmt) == SQLITE_ROW)
+    while (sqlite3_step(selectEntitiesStmt) == SQLITE_ROW)
     {
         selectEntity(function);
     }
 
-    sqlite3_reset(selectEntityStmt);
+    sqlite3_reset(selectEntitiesStmt);
 }

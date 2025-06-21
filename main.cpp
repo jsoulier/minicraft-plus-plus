@@ -3,11 +3,12 @@
 #include <SDL3/SDL_main.h>
 
 #include "database.hpp"
-#include "renderer.hpp"
 #include "entity.hpp"
+#include "level.hpp"
+#include "renderer.hpp"
 
-static std::shared_ptr<MppEntity> player;
-
+static uint64_t databaseTime;
+static uint64_t currTime;
 static uint64_t t1;
 static uint64_t t2;
 
@@ -22,29 +23,22 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
         return SDL_APP_FAILURE;
     }
 
-    bool hasDatabase = mppDatabaseInit();
+    if (!mppLevelInit(mppDatabaseInit()))
+    {
+        SDL_Log("Failed to initialize level");
+        return SDL_APP_FAILURE;
+    }
 
+    databaseTime = mppDatabaseGetTime();
     t2 = SDL_GetTicks();
     t1 = t2;
-
-    if (hasDatabase)
-    {
-        mppDatabaseSelect([&](std::shared_ptr<MppEntity>& entity, int level)
-        {
-            player = entity;
-        });
-    }
-
-    if (!player)
-    {
-        player = mppEntityCreate(MppEntityTypePlayer);
-    }
 
     return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result)
 {
+    mppLevelQuit();
     mppDatabaseQuit();
     mppRendererQuit();
 }
@@ -54,10 +48,9 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     t2 = SDL_GetTicks();
     uint64_t dt = t2 - t1;
     t1 = t2;
+    currTime = databaseTime + t2;
 
-    player->update(dt);
-
-    mppDatabaseInsert(player, 0);
+    mppLevelUpdate(dt, currTime);
 
     uint64_t sprite1 = mppRendererCreateSprite(Red, Green, Blue, Magenta, 0, 0, 16);
     uint64_t sprite2 = mppRendererCreateSprite(Red, Green, Blue, Magenta, 16, 0, 16);
@@ -75,9 +68,15 @@ SDL_AppResult SDL_AppIterate(void* appstate)
     mppRendererDraw("testing", 64, 32, Green, 6);
     mppRendererDraw("testing", 192, 32, Blue, 6);
 
-    player->render();
+    mppLevelRender();
 
     mppRendererPresent();
+
+    /* TODO: cooldown */
+
+    mppLevelCommit();
+    mppDatabaseSetTime(currTime);
+    mppDatabaseCommit();
 
     return SDL_APP_CONTINUE;
 }

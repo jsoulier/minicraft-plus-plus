@@ -9,7 +9,8 @@
 MppEntity::MppEntity()
     : id{-1}
     , x{0.0f}
-    , y{0.0f} {}
+    , y{0.0f}
+    , level{-1} {}
 
 int64_t MppEntity::getId() const
 {
@@ -26,6 +27,11 @@ float MppEntity::getY() const
     return y;
 }
 
+int MppEntity::getLevel() const
+{
+    return level;
+}
+
 void MppEntity::setId(int64_t id)
 {
     this->id = id;
@@ -39,6 +45,11 @@ void MppEntity::setX(float x)
 void MppEntity::setY(float y)
 {
     this->y = y;
+}
+
+void MppEntity::setLevel(int level)
+{
+    this->level = level;
 }
 
 std::shared_ptr<MppEntity> mppEntityCreate(int type, void* args)

@@ -39,6 +39,7 @@ add_executable(minicraft++ WIN32
     e_mob.cpp
     e_player.cpp
     entity.cpp
+    level.cpp
     main.cpp
     renderer.cpp
     sqlite3.c

@@ -11,9 +11,9 @@ static constexpr int Width = 256;
 static constexpr int Height = 144;
 
 static constexpr const char* Spritesheet = "spritesheet.png";
+static constexpr const char* Font = "RasterForgeRegular.ttf";
 
 /* TODO: fonts have to be rendered at a very high resolution to avoid aliasing */
-static constexpr const char* Font = "RasterForgeRegular.ttf";
 static constexpr int FontResolution = 4;
 
 static constexpr auto Presentation = SDL_LOGICAL_PRESENTATION_LETTERBOX;
@@ -42,9 +42,9 @@ static std::unordered_map<int, TTF_Font*> fonts;
  */
 static SDL_Color getColor(uint64_t inColor)
 {
-    Uint8 red = (inColor / 100) % 10;
-    Uint8 green = (inColor / 10) % 10;
-    Uint8 blue = inColor % 10;
+    uint8_t red = (inColor / 100) % 10;
+    uint8_t green = (inColor / 10) % 10;
+    uint8_t blue = inColor % 10;
 
     assert(red >= 0 && red <= 5);
     assert(green >= 0 && green <= 5);
@@ -331,7 +331,7 @@ void mppRendererDraw(uint64_t sprite, float x, float y)
 
 void mppRendererDraw(const char* text, float x, float y, int inColor, int size)
 {
-    /* TODO: refactor (should cache the way sprites do) */
+    /* TODO: refactor */
 
     size *= FontResolution;
 

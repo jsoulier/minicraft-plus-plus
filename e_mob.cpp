@@ -18,7 +18,7 @@ void MppEntityMob::render()
     mppRendererDraw("here", x - 0.5f, y - 0.5f, White, 6);
 }
 
-void MppEntityMob::update(uint64_t dt)
+void MppEntityMob::update(uint64_t dt, uint64_t time)
 {
     int dx = 0;
     int dy = 0;
