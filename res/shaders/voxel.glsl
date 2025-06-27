@@ -1,7 +1,7 @@
 #ifndef VOXEL_GLSL
 #define VOXEL_GLSL
 
-vec3 voxelGetPosition(uint packed)
+vec3 VoxelGetPosition(uint packed)
 {
     ivec3 direction;
     direction.x = 1 - 2 * int((packed >> 7) & 0x1);
@@ -16,7 +16,7 @@ vec3 voxelGetPosition(uint packed)
     return magnitude * direction;
 }
 
-vec3 voxelGetNormal(uint packed)
+vec3 VoxelGetNormal(uint packed)
 {
     const vec3 Directions[6] = vec3[]
     (

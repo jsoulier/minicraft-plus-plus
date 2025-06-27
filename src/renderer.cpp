@@ -5,24 +5,68 @@
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
 
+#include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <format>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "window.hpp"
+#include "renderer.hpp"
 
+enum Shader
+{
+    ShaderModelFrag,
+    ShaderModelVert,
+    ShaderCount,
+};
+
+enum GraphicsPipeline
+{
+    GraphicsPipelineCount,
+};
+
+enum ComputePipeline
+{
+    ComputePipelineReadback,
+    ComputePipelineCount,
+};
+
+static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
+
+static constexpr std::string_view Shaders[] =
+{
+    "model.frag",
+    "model.vert",
+};
+
+static constexpr std::string_view ComputePipelines[] =
+{
+    "readback.comp",
+};
+
+static constexpr std::string_view Models[] =
+{
+    "grass",
+};
+
+static_assert(SDL_arraysize(Shaders) == ShaderCount);
+static_assert(SDL_arraysize(Models) == RendererModelCount);
+static_assert(SDL_arraysize(ComputePipelines) == ComputePipelineCount);
 
 static SDL_Window* window;
 static SDL_GPUDevice* device;
@@ -33,6 +77,7 @@ struct ShaderConfig
     SDL_GPUShaderFormat format;
     std::string_view suffix;
     std::string_view entrypoint;
+    std::vector<Uint8> data;
     int numUniformBuffers;
     int numSamplers;
     int numStorageBuffers;
@@ -46,7 +91,7 @@ struct ShaderConfig
     int threadCountZ;
 };
 
-static std::optional<ShaderConfig> loadShaderConfig(const std::string_view& name)
+static std::optional<ShaderConfig> LoadShaderConfig(const std::string_view& name)
 {
     std::string path = std::format("{}.json", name);
     std::ifstream file(path);
@@ -61,7 +106,7 @@ static std::optional<ShaderConfig> loadShaderConfig(const std::string_view& name
     {
         file >> json;
     }
-    catch (const nlohmann::json::parse_error& e)
+    catch (const std::exception& e)
     {
         SDL_Log("Failed to parse json: %s, %s", e.what(), name.data());
         return {};
@@ -83,7 +128,7 @@ static std::optional<ShaderConfig> loadShaderConfig(const std::string_view& name
     }
     else
     {
-        SDL_assert(false);
+        assert(false);
         return {};
     }
 
@@ -102,7 +147,7 @@ static std::optional<ShaderConfig> loadShaderConfig(const std::string_view& name
     return config;
 }
 
-static std::vector<Uint8> loadShaderData(const std::string& path)
+static std::vector<Uint8> LoadShaderData(const std::string& path)
 {
     std::ifstream file(path, std::ios::binary);
     if (!file)
@@ -120,16 +165,16 @@ static std::vector<Uint8> loadShaderData(const std::string& path)
     return data;
 }
 
-static SDL_GPUShader* loadShader(const std::string_view& name)
+static SDL_GPUShader* LoadShader(const std::string_view& name)
 {
-    std::optional<ShaderConfig> config = loadShaderConfig(name);
+    std::optional<ShaderConfig> config = LoadShaderConfig(name);
     if (!config)
     {
         SDL_Log("Failed to load shader config: %s", name.data());
         return nullptr;
     }
 
-    std::vector<Uint8> data = loadShaderData(std::format("{}.{}", name, config->suffix));
+    const std::vector<Uint8>& data = LoadShaderData(std::format("{}.{}", name, config->suffix));
     if (data.empty())
     {
         SDL_Log("Failed to load shader data: %s", name.data());
@@ -164,16 +209,16 @@ static SDL_GPUShader* loadShader(const std::string_view& name)
     return shader;
 }
 
-static SDL_GPUComputePipeline* loadComputeShader(const std::string_view& name)
+static SDL_GPUComputePipeline* LoadComputePipeline(const std::string_view& name)
 {
-    std::optional<ShaderConfig> config = loadShaderConfig(name);
+    std::optional<ShaderConfig> config = LoadShaderConfig(name);
     if (!config)
     {
         SDL_Log("Failed to load shader config: %s", name.data());
         return nullptr;
     }
 
-    std::vector<Uint8> data = loadShaderData(std::format("{}.{}", name, config->suffix));
+    const std::vector<Uint8>& data = LoadShaderData(std::format("{}.{}", name, config->suffix));
     if (data.empty())
     {
         SDL_Log("Failed to load shader data: %s", name.data());
@@ -191,6 +236,9 @@ static SDL_GPUComputePipeline* loadComputeShader(const std::string_view& name)
     info.num_readonly_storage_buffers = config->numReadOnlyStorageBuffers;
     info.num_readwrite_storage_textures = config->numReadWriteStorageTextures;
     info.num_readonly_storage_textures = config->numReadOnlyStorageTextures;
+    info.threadcount_x = config->threadCountX;
+    info.threadcount_y = config->threadCountY;
+    info.threadcount_z = config->threadCountZ;
 
     SDL_GPUComputePipeline* shader = SDL_CreateGPUComputePipeline(device, &info);
     if (!shader)
@@ -202,7 +250,7 @@ static SDL_GPUComputePipeline* loadComputeShader(const std::string_view& name)
     return shader;
 }
 
-static SDL_GPUTexture* loadTexture(SDL_GPUCopyPass* copyPass, const std::string_view& path)
+static SDL_GPUTexture* LoadTexture(SDL_GPUCopyPass* copyPass, const std::string_view& path)
 {
     int channels;
     int width;
@@ -287,7 +335,7 @@ struct Voxel
 
     bool operator==(const Voxel other) const
     {
-        return packed == other.packed && texcoord == other.texcoord;
+        return packed == other.packed && std::abs(texcoord - other.texcoord) < Epsilon;
     }
 };
 
@@ -311,7 +359,7 @@ struct Model
     uint32_t vertexCount;
     uint32_t indexCount;
 
-    bool load(SDL_GPUCopyPass* copyPass, const std::string_view& name)
+    bool Load(SDL_GPUCopyPass* copyPass, const std::string_view& name)
     {
         std::string objPath = std::format("{}.obj", name);
         std::string pngPath = std::format("{}.png", name);
@@ -383,9 +431,9 @@ struct Model
             int positionX = objMesh->positions[positionIndex * 3 + 0] * 10.0f;
             int positionY = objMesh->positions[positionIndex * 3 + 1] * 10.0f;
             int positionZ = objMesh->positions[positionIndex * 3 + 2] * 10.0f;
-            SDL_assert(positionX > -128 && positionX < 128);
-            SDL_assert(positionY > -128 && positionY < 128);
-            SDL_assert(positionZ > -128 && positionZ < 128);
+            assert(positionX > -128 && positionX < 128);
+            assert(positionY > -128 && positionY < 128);
+            assert(positionZ > -128 && positionZ < 128);
             int normalX = objMesh->normals[normalIndex * 3 + 0];
             int normalY = objMesh->normals[normalIndex * 3 + 1];
             int normalZ = objMesh->normals[normalIndex * 3 + 2];
@@ -417,7 +465,7 @@ struct Model
             }
             else
             {
-                SDL_assert(false);
+                assert(false);
             }
 
             Voxel vertex{};
@@ -480,7 +528,7 @@ struct Model
         SDL_ReleaseGPUTransferBuffer(device, vertexTransferBuffer);
         SDL_ReleaseGPUTransferBuffer(device, indexTransferBuffer);
 
-        paletteTexture = loadTexture(copyPass, pngPath);
+        paletteTexture = LoadTexture(copyPass, pngPath);
         if (!paletteTexture)
         {
             SDL_Log("Failed to load palette: %s", pngPath.data());
@@ -491,9 +539,60 @@ struct Model
 
         return true; 
     }
+
+    void Destroy()
+    {
+        SDL_ReleaseGPUBuffer(device, vertexBuffer);
+        SDL_ReleaseGPUBuffer(device, indexBuffer);
+        SDL_ReleaseGPUTexture(device, paletteTexture);
+
+        vertexBuffer = nullptr;
+        indexBuffer = nullptr;
+        paletteTexture = nullptr;
+    }
 };
 
-static bool createDevice()
+template<typename T, SDL_GPUBufferUsageFlags U = SDL_GPU_BUFFERUSAGE_VERTEX>
+struct Buffer
+{
+    SDL_GPUBuffer* buffer;
+    SDL_GPUTransferBuffer* transferBuffer;
+    uint32_t size;
+    uint32_t capacity;
+
+    void Append(const T& item)
+    {
+        /* TODO: */
+    }
+
+    void Upload(SDL_GPUCopyPass* copyPass)
+    {
+        /* TODO: */
+    }
+
+    void Destroy()
+    {
+        SDL_ReleaseGPUBuffer(device, buffer);
+        SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+
+        buffer = nullptr;
+        transferBuffer = nullptr;
+    }
+};
+
+struct Transform
+{
+    glm::vec3 position;
+    float rotation;
+};
+
+static std::array<SDL_GPUShader*, ShaderCount> shaders;
+static std::array<SDL_GPUGraphicsPipeline*, GraphicsPipelineCount> graphicsPipelines;
+static std::array<SDL_GPUComputePipeline*, ComputePipelineCount> computePipelines;
+static std::array<Model, RendererModelCount> models;
+static std::array<Buffer<Transform>, RendererModelCount> modelInstances;
+
+static bool CreateDevice()
 {
     SDL_PropertiesID properties = SDL_CreateProperties();
 
@@ -524,7 +623,38 @@ static bool createDevice()
     return true;
 }
 
-bool windowInit()
+static bool LoadModels()
+{
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(device);
+    if (!commandBuffer)
+    {
+        SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (!copyPass)
+    {
+        SDL_Log("Failed to begin copy pass: %s", SDL_GetError());
+        return false;
+    }
+
+    for (int i = 0; i < RendererModelCount; i++)
+    {
+        if (!models[i].Load(copyPass, Models[i]))
+        {
+            SDL_Log("Failed to load model: %d", i);
+            return false;
+        }
+    }
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
+
+    return true;
+}
+
+bool RendererInit()
 {
     SDL_SetAppMetadata(Title, nullptr, nullptr);
 
@@ -541,7 +671,7 @@ bool windowInit()
         return false;
     }
 
-    if (!createDevice())
+    if (!CreateDevice())
     {
         SDL_Log("Failed to create device");
         return false;
@@ -566,11 +696,58 @@ bool windowInit()
         return false;
     }
 
+    for (int i = 0; i < ShaderCount; i++)
+    {
+        shaders[i] = LoadShader(Shaders[i]);
+        if (!shaders[i])
+        {
+            SDL_Log("Failed to load shader: %d", i);
+            return false;
+        }
+    }
+
+    for (int i = 0; i < ComputePipelineCount; i++)
+    {
+        computePipelines[i] = LoadComputePipeline(ComputePipelines[i]);
+        if (!computePipelines[i])
+        {
+            SDL_Log("Failed to load compute pipeline: %d", i);
+            return false;
+        }
+    }
+
+    if (!LoadModels())
+    {
+        SDL_Log("Failed to load models");
+        return false;
+    }
+
     return true;
 }
 
-void windowQuit()
+void RendererQuit()
 {
+    for (SDL_GPUShader* shader : shaders)
+    {
+        SDL_ReleaseGPUShader(device, shader);
+    }
+    for (SDL_GPUGraphicsPipeline* graphicsPipeline : graphicsPipelines)
+    {
+        SDL_ReleaseGPUGraphicsPipeline(device, graphicsPipeline);
+    }
+    for (SDL_GPUComputePipeline* computePipeline : computePipelines)
+    {
+        SDL_ReleaseGPUComputePipeline(device, computePipeline);
+    }
+    for (Model& model : models)
+    {
+        model.Destroy();
+    }
+    for (Buffer<Transform>& instance : modelInstances)
+    {
+        instance.Destroy();
+    }
+
     TTF_DestroyGPUTextEngine(textEngine);
     TTF_Quit();
     SDL_ReleaseWindowFromGPUDevice(device, window);

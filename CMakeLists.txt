@@ -18,7 +18,7 @@ add_subdirectory(lib/json)
 add_subdirectory(lib/stb)
 add_executable(minicraft++ WIN32
     src/main.cpp
-    src/window.cpp
+    src/renderer.cpp
 )
 set_target_properties(minicraft++ PROPERTIES CXX_STANDARD 23)
 target_link_libraries(minicraft++ PRIVATE SDL3::SDL3)
@@ -80,6 +80,15 @@ function(add_shader FILE)
     endif()
     package(${JSON})
 endfunction()
+add_shader(model.frag res/shaders/voxel.glsl)
+add_shader(model.vert res/shaders/voxel.glsl)
+add_shader(readback.comp)
+
+function(add_model FILE)
+    configure_file(res/models/${FILE}.obj ${BINARY_DIR} COPYONLY)
+    configure_file(res/models/${FILE}.png ${BINARY_DIR} COPYONLY)
+endfunction()
+add_model(grass)
 
 configure_file(LICENSE.txt ${BINARY_DIR} COPYONLY)
 configure_file(README.md ${BINARY_DIR} COPYONLY)

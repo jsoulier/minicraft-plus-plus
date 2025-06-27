@@ -2,7 +2,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-#include "window.hpp"
+#include "renderer.hpp"
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 {
@@ -10,9 +10,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
     SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
 #endif
 
-    if (!windowInit())
+    if (!RendererInit())
     {
-        SDL_Log("Failed to initialize window: %s", SDL_GetError());
+        SDL_Log("Failed to initialize renderer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
@@ -21,7 +21,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result)
 {
-    windowQuit();
+    RendererQuit();
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate)
