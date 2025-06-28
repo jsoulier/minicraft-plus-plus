@@ -1,2 +1,3 @@
-[ ] MSAA
+[x] MSAA
+[ ] Render at a smaller resolution. Memory usage is too high currently
 [ ] Use a single palette for all models

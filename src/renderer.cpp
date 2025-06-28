@@ -54,7 +54,9 @@ enum ComputePipeline
 enum RenderTarget
 {
     RenderTargetPositionPov,
+    RenderTargetPositionResolvePov,
     RenderTargetColorPov,
+    RenderTargetColorResolvePov,
     RenderTargetDepthPov,
     RenderTargetCount,
 };
@@ -70,6 +72,7 @@ static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
+static constexpr int RenderWidth = 1920;
 static constexpr const char* Font = "raster_forge.ttf";
 static constexpr int TextSequenceCount = 2;
 static constexpr glm::vec3 Up{0.0f, 1.0f, 0.0f};
@@ -79,6 +82,7 @@ static constexpr float PovDistance = 100.0f;
 static constexpr float PovFov = glm::radians(60.0f);
 static constexpr float PovNear = 0.1f;
 static constexpr float PovFar = 1000.0f;
+static constexpr int SampleCount = 4; /* 1, 2, 4, 8 */
 
 static constexpr std::string_view Shaders[] =
 {
@@ -980,6 +984,7 @@ struct TextInstance
     int valueIndex;
 };
 
+static SDL_GPUSampleCount sampleCount;
 static SDL_GPUTextureFormat swapchainTextureFormat;
 static SDL_GPUTextureFormat depthTextureFormat;
 static std::array<SDL_GPUShader*, ShaderCount> shaders;
@@ -1126,17 +1131,22 @@ static bool ResizeRenderTargets(int width, int height)
         renderTargets[i] = nullptr;
     }
 
-    renderTargetWidth = width;
-    renderTargetHeight = height;
+    float povRatio = static_cast<float>(width) / height;
+
+    renderTargetWidth = RenderWidth;
+    renderTargetHeight = RenderWidth / povRatio;;
 
     SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.num_levels = 1;
     info.width = renderTargetWidth;
     info.height = renderTargetHeight;
     info.layer_count_or_depth = 1;
-    info.num_levels = 1;
-    info.type = SDL_GPU_TEXTURETYPE_2D;
+
+    info.sample_count = sampleCount;
+
     info.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
-    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     renderTargets[RenderTargetPositionPov] = SDL_CreateGPUTexture(device, &info);
     if (!renderTargets[RenderTargetPositionPov])
     {
@@ -1145,7 +1155,7 @@ static bool ResizeRenderTargets(int width, int height)
     }
 
     info.format = swapchainTextureFormat;
-    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     renderTargets[RenderTargetColorPov] = SDL_CreateGPUTexture(device, &info);
     if (!renderTargets[RenderTargetColorPov])
     {
@@ -1157,6 +1167,26 @@ static bool ResizeRenderTargets(int width, int height)
     info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
     renderTargets[RenderTargetDepthPov] = SDL_CreateGPUTexture(device, &info);
     if (!renderTargets[RenderTargetDepthPov])
+    {
+        SDL_Log("Failed to create render target: %s", SDL_GetError());
+        return false;
+    }
+
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    info.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+    renderTargets[RenderTargetPositionResolvePov] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetPositionResolvePov])
+    {
+        SDL_Log("Failed to create render target: %s", SDL_GetError());
+        return false;
+    }
+
+    info.format = swapchainTextureFormat;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    renderTargets[RenderTargetColorResolvePov] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetColorResolvePov])
     {
         SDL_Log("Failed to create render target: %s", SDL_GetError());
         return false;
@@ -1219,6 +1249,7 @@ static void CreateModelPovGraphicsPipeline()
     info.target_info.num_color_targets = 2;
     info.target_info.depth_stencil_format = depthTextureFormat;
     info.target_info.has_depth_stencil_target = true;
+    info.multisample_state.sample_count = sampleCount;
 
     graphicsPipelines[GraphicsPipelineModelPov] = SDL_CreateGPUGraphicsPipeline(device, &info);
 }
@@ -1317,6 +1348,25 @@ bool RendererInit()
     else
     {
         depthTextureFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+    }
+
+    for (int i = 0; i < SampleCount; i++)
+    {
+        SDL_GPUSampleCount count = static_cast<SDL_GPUSampleCount>(i);
+        if (SDL_GPUTextureSupportsSampleCount(device, swapchainTextureFormat, count))
+        {
+            sampleCount = count;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if (!sampleCount)
+    {
+        SDL_Log("GPU doesn't supported MSAA");
+        return false;
     }
 
     if (!TTF_Init())
@@ -1526,12 +1576,16 @@ static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
     SDL_GPUColorTargetInfo colorTargets[2]{};
     colorTargets[0].texture = renderTargets[RenderTargetPositionPov];
+    colorTargets[0].resolve_texture = renderTargets[RenderTargetPositionResolvePov];
     colorTargets[0].load_op = SDL_GPU_LOADOP_CLEAR;
-    colorTargets[0].store_op = SDL_GPU_STOREOP_STORE;
+    colorTargets[0].store_op = SDL_GPU_STOREOP_RESOLVE;
+    colorTargets[0].cycle_resolve_texture = true;
     colorTargets[0].cycle = true;
     colorTargets[1].texture = renderTargets[RenderTargetColorPov];
+    colorTargets[1].resolve_texture = renderTargets[RenderTargetColorResolvePov];
     colorTargets[1].load_op = SDL_GPU_LOADOP_CLEAR;
-    colorTargets[1].store_op = SDL_GPU_STOREOP_STORE;
+    colorTargets[1].store_op = SDL_GPU_STOREOP_RESOLVE;
+    colorTargets[1].cycle_resolve_texture = true;
     colorTargets[1].cycle = true;
     SDL_GPUDepthStencilTargetInfo depthInfo{};
     depthInfo.texture = renderTargets[RenderTargetDepthPov];
@@ -1581,7 +1635,7 @@ static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 static void DrawTextInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
     SDL_GPUColorTargetInfo colorTarget{};
-    colorTarget.texture = renderTargets[RenderTargetColorPov];
+    colorTarget.texture = renderTargets[RenderTargetColorResolvePov];
     colorTarget.load_op = SDL_GPU_LOADOP_LOAD;
     colorTarget.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -1630,7 +1684,7 @@ static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture*
 {
     SDL_GPUBlitInfo info{};
     info.load_op = SDL_GPU_LOADOP_DONT_CARE;
-    info.source.texture = renderTargets[RenderTargetColorPov];
+    info.source.texture = renderTargets[RenderTargetColorResolvePov];
     info.source.w = renderTargetWidth;
     info.source.h = renderTargetHeight;
     info.destination.texture = swapchainTexture;
