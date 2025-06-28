@@ -34,6 +34,7 @@ enum Shader
 
 enum GraphicsPipeline
 {
+    GraphicsPipelineModel,
     GraphicsPipelineCount,
 };
 
@@ -202,7 +203,7 @@ static SDL_GPUShader* LoadShader(const std::string_view& name)
     SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
     if (!shader)
     {
-        SDL_Log("Failed to create shader: %s, %s", SDL_GetError(), name.data());
+        SDL_Log("Failed to create shader: %s, %s", name.data(), SDL_GetError());
         return nullptr;
     }
 
@@ -243,7 +244,7 @@ static SDL_GPUComputePipeline* LoadComputePipeline(const std::string_view& name)
     SDL_GPUComputePipeline* shader = SDL_CreateGPUComputePipeline(device, &info);
     if (!shader)
     {
-        SDL_Log("Failed to create compute pipeline: %s, %s", SDL_GetError(), name.data());
+        SDL_Log("Failed to create compute pipeline: %s, %s", name.data(), SDL_GetError());
         return nullptr;
     }
 
@@ -586,6 +587,9 @@ struct Transform
     float rotation;
 };
 
+static SDL_GPUTextureFormat swapchainTextureFormat;
+static SDL_GPUTextureFormat depthTextureFormat;
+
 static std::array<SDL_GPUShader*, ShaderCount> shaders;
 static std::array<SDL_GPUGraphicsPipeline*, GraphicsPipelineCount> graphicsPipelines;
 static std::array<SDL_GPUComputePipeline*, ComputePipelineCount> computePipelines;
@@ -654,6 +658,103 @@ static bool LoadModels()
     return true;
 }
 
+static void CreateModelGraphicsPipeline()
+{
+    SDL_GPUVertexAttribute attributes[] =
+    {{
+        .location = 0,
+        .buffer_slot = 0,
+        .format = SDL_GPU_VERTEXELEMENTFORMAT_UINT,
+        .offset = offsetof(Voxel, packed),
+    },
+    {
+        .location = 1,
+        .buffer_slot = 0,
+        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,
+        .offset = offsetof(Voxel, texcoord),
+    },
+    {
+        .location = 2,
+        .buffer_slot = 1,
+        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+        .offset = offsetof(Transform, position),
+    },
+    {
+        .location = 3,
+        .buffer_slot = 1,
+        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,
+        .offset = offsetof(Transform, rotation),
+    }};
+    SDL_GPUVertexBufferDescription buffers[] =
+    {{
+        .slot = 0,
+        .pitch = sizeof(Voxel),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+        .instance_step_rate = 0,
+    },
+    {
+        .slot = 1,
+        .pitch = sizeof(Transform),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE,
+        .instance_step_rate = 0,
+    }};
+    SDL_GPUColorTargetDescription targets[] =
+    {{
+        .format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
+    },
+    {
+        .format = swapchainTextureFormat,
+    }};
+    SDL_GPUGraphicsPipelineCreateInfo info =
+    {
+        .vertex_shader = shaders[ShaderModelVert],
+        .fragment_shader = shaders[ShaderModelFrag],
+        .vertex_input_state =
+        {
+            .vertex_buffer_descriptions = buffers,
+            .num_vertex_buffers = SDL_arraysize(buffers),
+            .vertex_attributes = attributes,
+            .num_vertex_attributes = SDL_arraysize(attributes),
+        },
+        .rasterizer_state =
+        {
+            .cull_mode = SDL_GPU_CULLMODE_BACK,
+            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+        },
+        .depth_stencil_state =
+        {
+            .compare_op = SDL_GPU_COMPAREOP_LESS,
+            .enable_depth_test = true,
+            .enable_depth_write = true,
+        },
+        .target_info =
+        {
+            .color_target_descriptions = targets,
+            .num_color_targets = SDL_arraysize(targets),
+            .depth_stencil_format = depthTextureFormat,
+            .has_depth_stencil_target = true,
+        },
+    };
+
+    graphicsPipelines[GraphicsPipelineModel] = SDL_CreateGPUGraphicsPipeline(device, &info);
+}
+
+static bool CreateGraphicsPipelines()
+{
+    CreateModelGraphicsPipeline();
+
+    for (int i = 0; i < GraphicsPipelineCount; i++)
+    {
+        if (!graphicsPipelines[i])
+        {
+            SDL_Log("Failed to create graphics pipeline: %d, %s", i, SDL_GetError());
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool RendererInit()
 {
     SDL_SetAppMetadata(Title, nullptr, nullptr);
@@ -681,6 +782,17 @@ bool RendererInit()
     {
         SDL_Log("Failed to claim window: %s", SDL_GetError());
         return false;
+    }
+
+    swapchainTextureFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
+    if (SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTURETYPE_2D,
+        SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+    {
+        depthTextureFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    }
+    else
+    {
+        depthTextureFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
     }
 
     if (!TTF_Init())
@@ -722,30 +834,39 @@ bool RendererInit()
         return false;
     }
 
+    if (!CreateGraphicsPipelines())
+    {
+        SDL_Log("Failed to create graphics pipelines");
+        return false;
+    }
+
     return true;
 }
 
 void RendererQuit()
 {
-    for (SDL_GPUShader* shader : shaders)
+    for (int i = 0; i < ShaderCount; i++)
     {
-        SDL_ReleaseGPUShader(device, shader);
+        SDL_ReleaseGPUShader(device, shaders[i]);
+        shaders[i] = nullptr;
     }
-    for (SDL_GPUGraphicsPipeline* graphicsPipeline : graphicsPipelines)
+
+    for (int i = 0; i < GraphicsPipelineCount; i++)
     {
-        SDL_ReleaseGPUGraphicsPipeline(device, graphicsPipeline);
+        SDL_ReleaseGPUGraphicsPipeline(device, graphicsPipelines[i]);
+        graphicsPipelines[i] = nullptr;
     }
-    for (SDL_GPUComputePipeline* computePipeline : computePipelines)
+
+    for (int i = 0; i < ComputePipelineCount; i++)
     {
-        SDL_ReleaseGPUComputePipeline(device, computePipeline);
+        SDL_ReleaseGPUComputePipeline(device, computePipelines[i]);
+        computePipelines[i] = nullptr;
     }
-    for (Model& model : models)
+
+    for (int i = 0; i < RendererModelCount; i++)
     {
-        model.Destroy();
-    }
-    for (Buffer<Transform>& instance : modelInstances)
-    {
-        instance.Destroy();
+        models[i].Destroy();
+        modelInstances[i].Destroy();
     }
 
     TTF_DestroyGPUTextEngine(textEngine);
@@ -758,4 +879,34 @@ void RendererQuit()
     textEngine = nullptr;
     device = nullptr;
     window = nullptr;
+}
+
+void RendererSubmit()
+{
+    SDL_WaitForGPUSwapchain(device, window);
+
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(device);
+    if (!commandBuffer)
+    {
+        SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTexture* swapchainTexture;
+    uint32_t width;
+    uint32_t height;
+    if (!SDL_AcquireGPUSwapchainTexture(commandBuffer, window, &swapchainTexture, &width, &height))
+    {
+        SDL_Log("Failed to acquire swapchain texture: %s", SDL_GetError());
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
+    if (!swapchainTexture || !width || !height)
+    {
+        SDL_SubmitGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
 }

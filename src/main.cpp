@@ -26,6 +26,8 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
+    RendererSubmit();
+
     return SDL_APP_CONTINUE;
 }
 

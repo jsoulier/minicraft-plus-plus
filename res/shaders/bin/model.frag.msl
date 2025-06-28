@@ -3,7 +3,23 @@
 
 using namespace metal;
 
-fragment void main0()
+struct main0_out
 {
+    float4 outPosition [[color(0)]];
+    float4 outColor [[color(1)]];
+};
+
+struct main0_in
+{
+    float3 inPosition [[user(locn0)]];
+    float2 inTexcoord [[user(locn1), flat]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], texture2d<float> paletteTexture [[texture(0)]], sampler paletteTextureSmplr [[sampler(0)]])
+{
+    main0_out out = {};
+    out.outPosition = float4(in.inPosition, 0.0);
+    out.outColor = paletteTexture.sample(paletteTextureSmplr, in.inTexcoord);
+    return out;
 }
 
