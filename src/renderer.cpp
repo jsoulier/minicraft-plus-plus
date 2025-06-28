@@ -574,15 +574,105 @@ struct Buffer
     SDL_GPUTransferBuffer* transferBuffer;
     uint32_t size;
     uint32_t capacity;
+    T* data;
+    bool resize;
 
-    void Append(const T& item)
+    template<typename... Args>
+    void Emplace(Args&&... args)
     {
-        /* TODO: */
+        if (!data && transferBuffer)
+        {
+            size = 0;
+            resize = false;
+            data = static_cast<T*>(SDL_MapGPUTransferBuffer(device, transferBuffer, true));
+            if (!data)
+            {
+                SDL_Log("Failed to map transfer buffer: %s", SDL_GetError());
+                return;
+            }
+        }
+
+        if (size == capacity)
+        {
+            uint32_t newCapacity;
+            if (size)
+            {
+                newCapacity = size * 2;
+            }
+            else
+            {
+                newCapacity = 10;
+            }
+
+            SDL_GPUTransferBufferCreateInfo info{};
+            info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            info.size = newCapacity * sizeof(T);
+            SDL_GPUTransferBuffer* newTransferBuffer = SDL_CreateGPUTransferBuffer(device, &info);
+            if (!newTransferBuffer)
+            {
+                SDL_Log("Failed to create transfer buffer: %s", SDL_GetError());
+                return;
+            }
+
+            T* newData = static_cast<T*>(SDL_MapGPUTransferBuffer(device, newTransferBuffer, false));
+            if (!newData)
+            {
+                SDL_Log("Failed to map transfer buffer: %s", SDL_GetError());
+                SDL_ReleaseGPUTransferBuffer(device, newTransferBuffer);
+                return;
+            }
+
+            if (data)
+            {
+                std::memcpy(newData, data, size * sizeof(T));
+                SDL_UnmapGPUTransferBuffer(device, transferBuffer);
+            }
+
+            SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+            capacity = newCapacity;
+            transferBuffer = newTransferBuffer;
+            data = newData;
+            resize = true;
+        }
+
+        data[size++] = T{std::forward<Args>(args)...};
     }
 
     void Upload(SDL_GPUCopyPass* copyPass)
     {
-        /* TODO: */
+        if (resize)
+        {
+            SDL_ReleaseGPUBuffer(device, buffer);
+            buffer = nullptr;
+
+            SDL_GPUBufferCreateInfo info{};
+            info.usage = U;
+            info.size = capacity * sizeof(T);
+            buffer = SDL_CreateGPUBuffer(device, &info);
+            if (!buffer)
+            {
+                SDL_Log("Failed to create buffer: %s", SDL_GetError());
+                return;
+            }
+
+            resize = false;
+        }
+
+        if (data)
+        {
+            SDL_UnmapGPUTransferBuffer(device, transferBuffer);
+            data = nullptr;
+        }
+
+        if (size)
+        {
+            SDL_GPUTransferBufferLocation location{};
+            SDL_GPUBufferRegion region{};
+            location.transfer_buffer = transferBuffer;
+            region.buffer = buffer;
+            region.size = size * sizeof(T);
+            SDL_UploadToGPUBuffer(copyPass, &location, &region, true);
+        }
     }
 
     void Destroy()
@@ -962,6 +1052,11 @@ void RendererQuit()
     textEngine = nullptr;
     device = nullptr;
     window = nullptr;
+}
+
+void RendererDraw(RendererModel model, const glm::vec3& position, float rotation)
+{
+    modelInstances[model].Emplace(position, rotation);
 }
 
 static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const char* name)
