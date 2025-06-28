@@ -1,0 +1,2 @@
+[ ] MSAA
+[ ] Use a single palette for all models

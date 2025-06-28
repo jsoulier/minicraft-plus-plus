@@ -17,7 +17,7 @@ add_subdirectory(lib/glm)
 add_subdirectory(lib/json)
 add_subdirectory(lib/stb)
 add_executable(minicraft++ WIN32
-    src/main.cpp
+    src/app.cpp
     src/renderer.cpp
 )
 set_target_properties(minicraft++ PROPERTIES CXX_STANDARD 23)
@@ -92,3 +92,4 @@ add_model(grass)
 
 configure_file(LICENSE.txt ${BINARY_DIR} COPYONLY)
 configure_file(README.md ${BINARY_DIR} COPYONLY)
+configure_file(res/fonts/raster_forge.ttf ${BINARY_DIR} COPYONLY)

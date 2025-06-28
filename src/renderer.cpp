@@ -1,8 +1,11 @@
+#define GLM_ENABLE_EXPERIMENTAL
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <fast_obj.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
 
@@ -28,14 +31,14 @@
 
 enum Shader
 {
-    ShaderModelPOVFrag,
+    ShaderModelPovFrag,
     ShaderModelVert,
     ShaderCount,
 };
 
 enum GraphicsPipeline
 {
-    GraphicsPipelineModelPOV,
+    GraphicsPipelineModelPov,
     GraphicsPipelineCount,
 };
 
@@ -47,9 +50,9 @@ enum ComputePipeline
 
 enum RenderTarget
 {
-    RenderTargetPositionPOV,
-    RenderTargetColorPOV,
-    RenderTargetDepthPOV,
+    RenderTargetPositionPov,
+    RenderTargetColorPov,
+    RenderTargetDepthPov,
     RenderTargetCount,
 };
 
@@ -64,13 +67,15 @@ static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
-static constexpr float POVSpeed = 1.0f;
-static constexpr float POVPitch = glm::radians(-45.0f);
-static constexpr float POVDistance = 100.0f;
-static constexpr float POVFOV = glm::radians(60.0f);
-static constexpr float POVNear = 0.1f;
-static constexpr float POVFar = 1000.0f;
-static constexpr glm::vec3 POVUp{0.0f, 1.0f, 0.0f};
+static constexpr const char* Font = "raster_forge.ttf";
+static constexpr int TextSequenceCount = 2;
+static constexpr float PovSpeed = 1.0f;
+static constexpr float PovPitch = glm::radians(-45.0f);
+static constexpr float PovDistance = 100.0f;
+static constexpr float PovFov = glm::radians(60.0f);
+static constexpr float PovNear = 0.1f;
+static constexpr float PovFar = 1000.0f;
+static constexpr glm::vec3 Up{0.0f, 1.0f, 0.0f};
 
 static constexpr std::string_view Shaders[] =
 {
@@ -699,6 +704,105 @@ struct Transform
     float rotation;
 };
 
+struct TextSearchKey
+{
+    std::string_view text;
+    int size;
+};
+
+struct TextKey
+{
+    std::string text;
+    int size;
+
+    TextKey(const TextSearchKey& key)
+        : text{key.text}
+        , size{key.size} {}
+
+    bool operator==(const TextKey& other) const
+    {
+        return text == other.text && size == other.size;
+    }
+};
+
+namespace std
+{
+    template<>
+    struct hash<TextSearchKey>
+    {
+        size_t operator()(const TextSearchKey& key) const
+        {
+            return std::hash<std::string_view>{}(key.text) ^ std::hash<int>{}(key.size);
+        }
+    };
+
+    template<>
+    struct hash<TextKey>
+    {
+        size_t operator()(const TextKey& key) const
+        {
+            return std::hash<std::string>{}(key.text) ^ std::hash<int>{}(key.size);
+        }
+    };
+}
+
+struct TextHash
+{
+    using is_transparent = void;
+
+    size_t operator()(const TextKey& key) const
+    {
+        return std::hash<TextKey>{}(key);
+    }
+
+    size_t operator()(const TextSearchKey& key) const
+    {
+        return std::hash<TextSearchKey>{}(key);
+    }
+};
+
+struct TextKeyEqual
+{
+    bool operator()(const TextKey& lhs, const TextKey& rhs) const
+    {
+        return lhs == rhs;
+    }
+
+    bool operator()(const TextKey& lhs, const TextSearchKey& rhs) const
+    {
+        return lhs.text == rhs.text && lhs.size == rhs.size;
+    }
+
+    bool operator()(const TextSearchKey& lhs, const TextKey& rhs) const
+    {
+        return operator()(rhs, lhs);
+    }
+};
+
+struct TextSequence
+{
+    SDL_GPUTexture* atlasTexture;
+    int firstVertex;
+    int firstIndex;
+    int vertexCount;
+    int indexCount;
+};
+
+struct TextValue
+{
+    TextSequence sequences[TextSequenceCount];
+    int sequenceCount;
+    SDL_GPUBuffer* vertexBuffer;
+    SDL_GPUBuffer* indexBuffer;
+};
+
+struct TextInstance
+{
+    glm::vec2 position;
+    glm::vec4 color;
+    int valueIndex;
+};
+
 static SDL_GPUTextureFormat swapchainTextureFormat;
 static SDL_GPUTextureFormat depthTextureFormat;
 static std::array<SDL_GPUShader*, ShaderCount> shaders;
@@ -708,6 +812,10 @@ static std::array<SDL_GPUTexture*, RenderTargetCount> renderTargets;
 static std::array<SDL_GPUSampler*, SamplerCount> samplers;
 static std::array<Model, RendererModelCount> models;
 static std::array<Buffer<Transform>, RendererModelCount> modelInstances;
+static std::unordered_map<int, TTF_Font*> fonts;
+static std::unordered_map<TextKey, int, TextHash, TextKeyEqual> textKeyToValueIndex;
+static std::vector<TextValue> textValues;
+static std::vector<TextInstance> textInstances;
 static int swapchainWidth;
 static int swapchainHeight;
 static int renderTargetWidth;
@@ -715,6 +823,27 @@ static int renderTargetHeight;
 static glm::mat4 povViewProjMatrix;
 static glm::vec3 povPosition;
 static float povRotation;
+
+static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
+{
+#ifndef NDEBUG
+    SDL_PushGPUDebugGroup(commandBuffer, name.data());
+#endif
+}
+
+static void InsertDebugLabel(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
+{
+#ifndef NDEBUG
+    SDL_InsertGPUDebugLabel(commandBuffer, name.data());
+#endif
+}
+
+static void PopDebugGroup(SDL_GPUCommandBuffer* commandBuffer)
+{
+#ifndef NDEBUG
+    SDL_PopGPUDebugGroup(commandBuffer);
+#endif
+}
 
 static bool CreateDevice()
 {
@@ -831,8 +960,8 @@ static bool ResizeRenderTargets(int width, int height)
     info.type = SDL_GPU_TEXTURETYPE_2D;
     info.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
     info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
-    renderTargets[RenderTargetPositionPOV] = SDL_CreateGPUTexture(device, &info);
-    if (!renderTargets[RenderTargetPositionPOV])
+    renderTargets[RenderTargetPositionPov] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetPositionPov])
     {
         SDL_Log("Failed to create render target: %s", SDL_GetError());
         return false;
@@ -840,8 +969,8 @@ static bool ResizeRenderTargets(int width, int height)
 
     info.format = swapchainTextureFormat;
     info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    renderTargets[RenderTargetColorPOV] = SDL_CreateGPUTexture(device, &info);
-    if (!renderTargets[RenderTargetColorPOV])
+    renderTargets[RenderTargetColorPov] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetColorPov])
     {
         SDL_Log("Failed to create render target: %s", SDL_GetError());
         return false;
@@ -849,8 +978,8 @@ static bool ResizeRenderTargets(int width, int height)
 
     info.format = depthTextureFormat;
     info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    renderTargets[RenderTargetDepthPOV] = SDL_CreateGPUTexture(device, &info);
-    if (!renderTargets[RenderTargetDepthPOV])
+    renderTargets[RenderTargetDepthPov] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetDepthPov])
     {
         SDL_Log("Failed to create render target: %s", SDL_GetError());
         return false;
@@ -862,7 +991,7 @@ static bool ResizeRenderTargets(int width, int height)
     return true;
 }
 
-static void CreateModelPOVGraphicsPipeline()
+static void CreateModelPovGraphicsPipeline()
 {
     SDL_GPUVertexAttribute attribs[4]{};
     SDL_GPUVertexBufferDescription buffers[2]{};
@@ -896,7 +1025,7 @@ static void CreateModelPOVGraphicsPipeline()
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = shaders[ShaderModelVert];
-    info.fragment_shader = shaders[ShaderModelPOVFrag];
+    info.fragment_shader = shaders[ShaderModelPovFrag];
     info.vertex_input_state.vertex_buffer_descriptions = buffers;
     info.vertex_input_state.num_vertex_buffers = 2;
     info.vertex_input_state.vertex_attributes = attribs;
@@ -911,12 +1040,12 @@ static void CreateModelPOVGraphicsPipeline()
     info.target_info.depth_stencil_format = depthTextureFormat;
     info.target_info.has_depth_stencil_target = true;
 
-    graphicsPipelines[GraphicsPipelineModelPOV] = SDL_CreateGPUGraphicsPipeline(device, &info);
+    graphicsPipelines[GraphicsPipelineModelPov] = SDL_CreateGPUGraphicsPipeline(device, &info);
 }
 
 static bool CreateGraphicsPipelines()
 {
-    CreateModelPOVGraphicsPipeline();
+    CreateModelPovGraphicsPipeline();
 
     for (int i = 0; i < GraphicsPipelineCount; i++)
     {
@@ -1082,20 +1211,20 @@ void RendererMove(const glm::vec3& position, float rotation)
         return;
     }
 
-    povPosition = glm::mix(povPosition, position, POVSpeed);
-    povRotation = glm::mix(povRotation, rotation, POVSpeed);
+    povPosition = glm::mix(povPosition, position, PovSpeed);
+    povRotation = glm::mix(povRotation, rotation, PovSpeed);
 
     glm::vec3 povForward;
-    povForward.x = std::cos(POVPitch) * std::cos(povRotation);
-    povForward.y = std::sin(POVPitch);
-    povForward.z = std::cos(POVPitch) * std::sin(povRotation);
+    povForward.x = std::cos(PovPitch) * std::cos(povRotation);
+    povForward.y = std::sin(PovPitch);
+    povForward.z = std::cos(PovPitch) * std::sin(povRotation);
 
     float povRatio = static_cast<float>(renderTargetWidth) / renderTargetHeight;
 
-    glm::vec3 povEye = povPosition - povForward * POVDistance;
+    glm::vec3 povEye = povPosition - povForward * PovDistance;
     glm::vec3 povCenter = povEye + povForward;
-    glm::mat4 povViewMatrix = glm::lookAt(povEye, povCenter, POVUp);
-    glm::mat4 povProjMatrix = glm::perspective(POVFOV, povRatio, POVNear, POVFar);
+    glm::mat4 povViewMatrix = glm::lookAt(povEye, povCenter, Up);
+    glm::mat4 povProjMatrix = glm::perspective(PovFov, povRatio, PovNear, PovFar);
 
     povViewProjMatrix = povProjMatrix * povViewMatrix;
 }
@@ -1105,25 +1234,19 @@ void RendererDraw(RendererModel model, const glm::vec3& position, float rotation
     modelInstances[model].Emplace(position, rotation);
 }
 
-static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
+void RendererDraw(const std::string_view& text, const glm::vec2& position, const glm::vec4& color, int size)
 {
-#ifndef NDEBUG
-    SDL_PushGPUDebugGroup(commandBuffer, name.data());
-#endif
-}
+    TextSearchKey searchKey{text, size};
 
-static void InsertDebugLabel(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
-{
-#ifndef NDEBUG
-    SDL_InsertGPUDebugLabel(commandBuffer, name.data());
-#endif
-}
+    auto valueIndex = textKeyToValueIndex.find(searchKey);
+    if (valueIndex == textKeyToValueIndex.end())
+    {
+        int valueIndexInt = static_cast<int>(textValues.size());
+        valueIndex = textKeyToValueIndex.emplace(searchKey, valueIndexInt).first;
+        textValues.resize(valueIndexInt + 1);
+    }
 
-static void PopDebugGroup(SDL_GPUCommandBuffer* commandBuffer)
-{
-#ifndef NDEBUG
-    SDL_PopGPUDebugGroup(commandBuffer);
-#endif
+    textInstances.emplace_back(position, color, valueIndex->second);
 }
 
 static void UploadModelInstances(SDL_GPUCommandBuffer* commandBuffer)
@@ -1143,19 +1266,24 @@ static void UploadModelInstances(SDL_GPUCommandBuffer* commandBuffer)
     SDL_EndGPUCopyPass(copyPass);
 }
 
-static void DrawPOVModelInstances(SDL_GPUCommandBuffer* commandBuffer)
+static void UploadTextInstances(SDL_GPUCommandBuffer* commandBuffer)
+{
+    /* TODO: */
+}
+
+static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
     SDL_GPUColorTargetInfo colorTargets[2]{};
-    colorTargets[0].texture = renderTargets[RenderTargetPositionPOV];
+    colorTargets[0].texture = renderTargets[RenderTargetPositionPov];
     colorTargets[0].load_op = SDL_GPU_LOADOP_CLEAR;
     colorTargets[0].store_op = SDL_GPU_STOREOP_STORE;
     colorTargets[0].cycle = true;
-    colorTargets[1].texture = renderTargets[RenderTargetColorPOV];
+    colorTargets[1].texture = renderTargets[RenderTargetColorPov];
     colorTargets[1].load_op = SDL_GPU_LOADOP_CLEAR;
     colorTargets[1].store_op = SDL_GPU_STOREOP_STORE;
     colorTargets[1].cycle = true;
     SDL_GPUDepthStencilTargetInfo depthInfo{};
-    depthInfo.texture = renderTargets[RenderTargetDepthPOV];
+    depthInfo.texture = renderTargets[RenderTargetDepthPov];
     depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
     depthInfo.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
     depthInfo.store_op = SDL_GPU_STOREOP_STORE;
@@ -1169,7 +1297,7 @@ static void DrawPOVModelInstances(SDL_GPUCommandBuffer* commandBuffer)
         return;
     }
 
-    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipelines[GraphicsPipelineModelPOV]);
+    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipelines[GraphicsPipelineModelPov]);
     SDL_PushGPUVertexUniformData(commandBuffer, 0, &povViewProjMatrix, 64);
 
     for (int i = 0; i < RendererModelCount; i++)
@@ -1199,11 +1327,16 @@ static void DrawPOVModelInstances(SDL_GPUCommandBuffer* commandBuffer)
     SDL_EndGPURenderPass(renderPass);
 }
 
+static void DrawTextInstances(SDL_GPUCommandBuffer* commandBuffer)
+{
+    /* TODO: */
+}
+
 static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture* swapchainTexture)
 {
     SDL_GPUBlitInfo info{};
     info.load_op = SDL_GPU_LOADOP_DONT_CARE;
-    info.source.texture = renderTargets[RenderTargetColorPOV];
+    info.source.texture = renderTargets[RenderTargetColorPov];
     info.source.w = renderTargetWidth;
     info.source.h = renderTargetHeight;
     info.destination.texture = swapchainTexture;
@@ -1252,8 +1385,16 @@ void RendererSubmit()
     UploadModelInstances(commandBuffer);
     PopDebugGroup(commandBuffer);
 
+    PushDebugGroup(commandBuffer, "upload_text_instances");
+    UploadTextInstances(commandBuffer);
+    PopDebugGroup(commandBuffer);
+
     PushDebugGroup(commandBuffer, "draw_pov_model_instances");
-    DrawPOVModelInstances(commandBuffer);
+    DrawPovModelInstances(commandBuffer);
+    PopDebugGroup(commandBuffer);
+
+    PushDebugGroup(commandBuffer, "draw_text_instances");
+    DrawTextInstances(commandBuffer);
     PopDebugGroup(commandBuffer);
 
     PushDebugGroup(commandBuffer, "blit_to_swapchain");

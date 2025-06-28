@@ -26,8 +26,11 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
-    RendererMove({}, 0.0f);
-    RendererDraw(RendererModelGrass, {}, 0.0f);
+    static float i = 0.0f;
+    i += 0.01f;
+
+    RendererMove({}, i);
+    RendererDraw(RendererModelGrass, {}, -i);
     RendererSubmit();
 
     return SDL_APP_CONTINUE;
