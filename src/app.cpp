@@ -31,6 +31,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 
     RendererMove({}, i);
     RendererDraw(RendererModelGrass, {}, -i);
+    RendererDraw("Hello World!", {100.0f, 100.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, 16);
     RendererSubmit();
 
     return SDL_APP_CONTINUE;

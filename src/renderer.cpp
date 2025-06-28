@@ -100,6 +100,7 @@ static_assert(SDL_arraysize(ComputePipelines) == ComputePipelineCount);
 static SDL_Window* window;
 static SDL_GPUDevice* device;
 static TTF_TextEngine* textEngine;
+static std::unordered_map<int, TTF_Font*> fonts;
 
 struct ShaderConfig
 {
@@ -779,6 +780,12 @@ struct TextKeyEqual
     }
 };
 
+struct TextVertex
+{
+    glm::vec2 position;
+    glm::vec2 texcoord;
+};
+
 struct TextSequence
 {
     SDL_GPUTexture* atlasTexture;
@@ -794,6 +801,166 @@ struct TextValue
     int sequenceCount;
     SDL_GPUBuffer* vertexBuffer;
     SDL_GPUBuffer* indexBuffer;
+    bool failed;
+
+    void Create(SDL_GPUCopyPass* copyPass, const TextKey& key)
+    {
+        /* TODO: it's not that important here but I should fix the leaking on error */
+
+        if (failed)
+        {
+            return;
+        }
+        failed = true;
+
+        auto font = fonts.find(key.size);
+        if (font == fonts.end())
+        {
+            TTF_Font* fontPtr = TTF_OpenFont(Font, key.size);
+            if (!fontPtr)
+            {
+                SDL_Log("Failed to load font: %s", SDL_GetError());
+            }
+
+            /* still emplace on error to avoiding loading every frame */
+            font = fonts.emplace(key.size, fontPtr).first;
+        }
+        if (!font->second)
+        {
+            return;
+        }
+
+        TTF_Text* text = TTF_CreateText(textEngine, font->second, key.text.data(), key.text.size());
+        if (!text)
+        {
+            SDL_Log("Failed to create text: %s", SDL_GetError());
+            return;
+        }
+
+        TTF_GPUAtlasDrawSequence* drawSequences = TTF_GetGPUTextDrawData(text);
+        if (!drawSequences)
+        {
+            SDL_Log("Failed to get text draw data: %s", SDL_GetError());
+            return;
+        }
+
+        int vertexCount = 0;
+        int indexCount = 0;
+
+        TTF_GPUAtlasDrawSequence* sequence = drawSequences;
+        while (sequence)
+        {
+            vertexCount += sequence->num_vertices;
+            indexCount += sequence->num_indices;
+            sequence = sequence->next;
+        }
+
+        SDL_GPUTransferBuffer* vertexTransferBuffer;
+        SDL_GPUTransferBuffer* indexTransferBuffer;
+
+        {
+            SDL_GPUTransferBufferCreateInfo info{};
+            info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            info.size = vertexCount * sizeof(TextVertex);
+            vertexTransferBuffer = SDL_CreateGPUTransferBuffer(device, &info);
+            if (!vertexTransferBuffer)
+            {
+                SDL_Log("Failed to create transfer buffer: %s", SDL_GetError());
+                return;
+            }
+
+            info.size = indexCount * sizeof(uint32_t);
+            indexTransferBuffer = SDL_CreateGPUTransferBuffer(device, &info);
+            if (!indexTransferBuffer)
+            {
+                SDL_Log("Failed to create transfer buffer: %s", SDL_GetError());
+                return;
+            }
+        }
+
+        TextVertex* vertexData = static_cast<TextVertex*>(SDL_MapGPUTransferBuffer(device, vertexTransferBuffer, false));
+        uint32_t* indexData = static_cast<uint32_t*>(SDL_MapGPUTransferBuffer(device, indexTransferBuffer, false));
+        if (!vertexData || !indexData)
+        {
+            SDL_Log("Failed to map transfer buffer(s): %s", SDL_GetError());
+            return;
+        }
+
+        sequence = drawSequences;
+        vertexCount = 0;
+        indexCount = 0;
+        sequenceCount = 0;
+        while (sequence)
+        {
+            TextSequence& textSequence = sequences[sequenceCount];
+            textSequence.atlasTexture = sequence->atlas_texture;
+            textSequence.firstVertex = vertexCount;
+            textSequence.firstIndex = indexCount;
+            textSequence.vertexCount = sequence->num_vertices;
+            textSequence.indexCount = sequence->num_indices;
+
+            for (int i = 0; i < sequence->num_vertices; i++)
+            {
+                vertexData[vertexCount + i].position.x = sequence->xy[i].x;
+                vertexData[vertexCount + i].position.y = sequence->xy[i].y;
+                vertexData[vertexCount + i].texcoord.x = sequence->uv[i].x;
+                vertexData[vertexCount + i].texcoord.y = sequence->uv[i].y;
+            }
+
+            vertexCount += sequence->num_vertices;
+            indexCount += sequence->num_indices;
+            sequenceCount++;
+            sequence = sequence->next;
+        }
+
+        SDL_UnmapGPUTransferBuffer(device, vertexTransferBuffer);
+        SDL_UnmapGPUTransferBuffer(device, indexTransferBuffer);
+
+        {
+            SDL_GPUBufferCreateInfo info{};
+            info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+            info.size = vertexCount * sizeof(TextVertex);
+            vertexBuffer = SDL_CreateGPUBuffer(device, &info);
+            if (!vertexBuffer)
+            {
+                SDL_Log("Failed to create buffer: %s", SDL_GetError());
+                return;
+            }
+
+            info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+            info.size = indexCount * sizeof(uint32_t);
+            indexBuffer = SDL_CreateGPUBuffer(device, &info);
+            if (!indexBuffer)
+            {
+                SDL_Log("Failed to create buffer: %s", SDL_GetError());
+                return;
+            }
+        }
+
+        SDL_GPUTransferBufferLocation location{};
+        SDL_GPUBufferRegion region{};
+        location.transfer_buffer = vertexTransferBuffer;
+        region.buffer = vertexBuffer;
+        region.size = vertexCount * sizeof(TextVertex);
+        SDL_UploadToGPUBuffer(copyPass, &location, &region, false);
+        location.transfer_buffer = indexTransferBuffer;
+        region.buffer = indexBuffer;
+        region.size = indexCount * sizeof(uint32_t);
+        SDL_UploadToGPUBuffer(copyPass, &location, &region, false);
+        SDL_ReleaseGPUTransferBuffer(device, vertexTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(device, indexTransferBuffer);
+
+        failed = false;
+    }
+
+    void Destroy()
+    {
+        SDL_ReleaseGPUBuffer(device, vertexBuffer);
+        SDL_ReleaseGPUBuffer(device, indexBuffer);
+
+        vertexBuffer = nullptr;
+        indexBuffer = nullptr;
+    }
 };
 
 struct TextInstance
@@ -812,7 +979,6 @@ static std::array<SDL_GPUTexture*, RenderTargetCount> renderTargets;
 static std::array<SDL_GPUSampler*, SamplerCount> samplers;
 static std::array<Model, RendererModelCount> models;
 static std::array<Buffer<Transform>, RendererModelCount> modelInstances;
-static std::unordered_map<int, TTF_Font*> fonts;
 static std::unordered_map<TextKey, int, TextHash, TextKeyEqual> textKeyToValueIndex;
 static std::vector<TextValue> textValues;
 static std::vector<TextInstance> textInstances;
@@ -1191,6 +1357,11 @@ void RendererQuit()
         modelInstances[i].Destroy();
     }
 
+    for (TextValue& textValue : textValues)
+    {
+        textValue.Destroy();
+    }
+
     TTF_DestroyGPUTextEngine(textEngine);
     TTF_Quit();
     SDL_ReleaseWindowFromGPUDevice(device, window);
@@ -1268,7 +1439,33 @@ static void UploadModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 
 static void UploadTextInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
-    /* TODO: */
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (!copyPass)
+    {
+        SDL_Log("Failed to begin copy pass: %s", SDL_GetError());
+        return;
+    }
+
+    for (const TextInstance& instance : textInstances)
+    {
+        TextValue& textValue = textValues[instance.valueIndex];
+        if (textValue.sequenceCount)
+        {
+            continue;
+        }
+
+        /* TODO: how bad is iterating over all values here? */
+        for (const auto& [key, index] : textKeyToValueIndex)
+        {
+            if (instance.valueIndex == index)
+            {
+                textValue.Create(copyPass, key);
+                break;
+            }
+        }
+    }
+
+    SDL_EndGPUCopyPass(copyPass);
 }
 
 static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
@@ -1330,6 +1527,8 @@ static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 static void DrawTextInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
     /* TODO: */
+
+    /* TODO: make sure to skip if failed is true */
 }
 
 static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture* swapchainTexture)
@@ -1402,4 +1601,5 @@ void RendererSubmit()
     PopDebugGroup(commandBuffer);
 
     SDL_SubmitGPUCommandBuffer(commandBuffer);
+    textInstances.clear();
 }
