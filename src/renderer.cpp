@@ -27,14 +27,14 @@
 
 enum Shader
 {
-    ShaderModelFrag,
+    ShaderModelPOVFrag,
     ShaderModelVert,
     ShaderCount,
 };
 
 enum GraphicsPipeline
 {
-    GraphicsPipelineModel,
+    GraphicsPipelineModelPOV,
     GraphicsPipelineCount,
 };
 
@@ -44,6 +44,20 @@ enum ComputePipeline
     ComputePipelineCount,
 };
 
+enum RenderTarget
+{
+    RenderTargetPositionPOV,
+    RenderTargetColorPOV,
+    RenderTargetCount,
+};
+
+enum Sampler
+{
+    SamplerLinearClamp,
+    SamplerNearestClamp,
+    SamplerCount,
+};
+
 static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
@@ -51,7 +65,7 @@ static constexpr int WindowHeight = 720;
 
 static constexpr std::string_view Shaders[] =
 {
-    "model.frag",
+    "model_pov.frag",
     "model.vert",
 };
 
@@ -589,12 +603,17 @@ struct Transform
 
 static SDL_GPUTextureFormat swapchainTextureFormat;
 static SDL_GPUTextureFormat depthTextureFormat;
-
 static std::array<SDL_GPUShader*, ShaderCount> shaders;
 static std::array<SDL_GPUGraphicsPipeline*, GraphicsPipelineCount> graphicsPipelines;
 static std::array<SDL_GPUComputePipeline*, ComputePipelineCount> computePipelines;
+static std::array<SDL_GPUTexture*, RenderTargetCount> renderTargets;
+static std::array<SDL_GPUSampler*, SamplerCount> samplers;
 static std::array<Model, RendererModelCount> models;
 static std::array<Buffer<Transform>, RendererModelCount> modelInstances;
+static int swapchainWidth;
+static int swapchainHeight;
+static int renderTargetWidth;
+static int renderTargetHeight;
 
 static bool CreateDevice()
 {
@@ -658,90 +677,136 @@ static bool LoadModels()
     return true;
 }
 
-static void CreateModelGraphicsPipeline()
+static bool CreateSamplers()
 {
-    SDL_GPUVertexAttribute attributes[] =
-    {{
-        .location = 0,
-        .buffer_slot = 0,
-        .format = SDL_GPU_VERTEXELEMENTFORMAT_UINT,
-        .offset = offsetof(Voxel, packed),
-    },
+    SDL_GPUSamplerCreateInfo info{};
+    info.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    info.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    info.min_filter = SDL_GPU_FILTER_LINEAR;
+    info.mag_filter = SDL_GPU_FILTER_LINEAR;
+    info.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+    samplers[SamplerLinearClamp] = SDL_CreateGPUSampler(device, &info);
+    if (!samplers[SamplerLinearClamp])
     {
-        .location = 1,
-        .buffer_slot = 0,
-        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,
-        .offset = offsetof(Voxel, texcoord),
-    },
-    {
-        .location = 2,
-        .buffer_slot = 1,
-        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
-        .offset = offsetof(Transform, position),
-    },
-    {
-        .location = 3,
-        .buffer_slot = 1,
-        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,
-        .offset = offsetof(Transform, rotation),
-    }};
-    SDL_GPUVertexBufferDescription buffers[] =
-    {{
-        .slot = 0,
-        .pitch = sizeof(Voxel),
-        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
-        .instance_step_rate = 0,
-    },
-    {
-        .slot = 1,
-        .pitch = sizeof(Transform),
-        .input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE,
-        .instance_step_rate = 0,
-    }};
-    SDL_GPUColorTargetDescription targets[] =
-    {{
-        .format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
-    },
-    {
-        .format = swapchainTextureFormat,
-    }};
-    SDL_GPUGraphicsPipelineCreateInfo info =
-    {
-        .vertex_shader = shaders[ShaderModelVert],
-        .fragment_shader = shaders[ShaderModelFrag],
-        .vertex_input_state =
-        {
-            .vertex_buffer_descriptions = buffers,
-            .num_vertex_buffers = SDL_arraysize(buffers),
-            .vertex_attributes = attributes,
-            .num_vertex_attributes = SDL_arraysize(attributes),
-        },
-        .rasterizer_state =
-        {
-            .cull_mode = SDL_GPU_CULLMODE_BACK,
-            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
-        },
-        .depth_stencil_state =
-        {
-            .compare_op = SDL_GPU_COMPAREOP_LESS,
-            .enable_depth_test = true,
-            .enable_depth_write = true,
-        },
-        .target_info =
-        {
-            .color_target_descriptions = targets,
-            .num_color_targets = SDL_arraysize(targets),
-            .depth_stencil_format = depthTextureFormat,
-            .has_depth_stencil_target = true,
-        },
-    };
+        SDL_Log("Failed to create linear clamp sampler: %s", SDL_GetError());
+        return false;
+    }
 
-    graphicsPipelines[GraphicsPipelineModel] = SDL_CreateGPUGraphicsPipeline(device, &info);
+    info.min_filter = SDL_GPU_FILTER_NEAREST;
+    info.mag_filter = SDL_GPU_FILTER_NEAREST;
+    info.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplers[SamplerNearestClamp] = SDL_CreateGPUSampler(device, &info);
+    if (!samplers[SamplerNearestClamp])
+    {
+        SDL_Log("Failed to create nearest clamp sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
+static bool ResizeRenderTargets(int width, int height)
+{
+    if (width == swapchainWidth && height == swapchainHeight)
+    {
+        return true;
+    }
+
+    for (int i = 0; i < RenderTargetCount; i++)
+    {
+        SDL_ReleaseGPUTexture(device, renderTargets[i]);
+        renderTargets[i] = nullptr;
+    }
+
+    renderTargetWidth = width;
+    renderTargetHeight = height;
+
+    SDL_GPUTextureCreateInfo info{};
+    info.width = renderTargetWidth;
+    info.height = renderTargetHeight;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+    renderTargets[RenderTargetPositionPOV] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetPositionPOV])
+    {
+        SDL_Log("Failed to create render target: %s", SDL_GetError());
+        return false;
+    }
+
+    info.format = swapchainTextureFormat;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    renderTargets[RenderTargetColorPOV] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetColorPOV])
+    {
+        SDL_Log("Failed to create render target: %s", SDL_GetError());
+        return false;
+    }
+
+    swapchainWidth = width;
+    swapchainHeight = height;
+
+    return true;
+}
+
+static void CreateModelPOVGraphicsPipeline()
+{
+    SDL_GPUVertexAttribute attribs[4]{};
+    SDL_GPUVertexBufferDescription buffers[2]{};
+    SDL_GPUColorTargetDescription targets[2]{};
+    attribs[0].location = 0;
+    attribs[0].buffer_slot = 0;
+    attribs[0].format = SDL_GPU_VERTEXELEMENTFORMAT_UINT;
+    attribs[0].offset = offsetof(Voxel, packed);
+    attribs[1].location = 1;
+    attribs[1].buffer_slot = 0;
+    attribs[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT;
+    attribs[1].offset = offsetof(Voxel, texcoord);
+    attribs[2].location = 2;
+    attribs[2].buffer_slot = 1;
+    attribs[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    attribs[2].offset = offsetof(Transform, position);
+    attribs[3].location = 3;
+    attribs[3].buffer_slot = 1;
+    attribs[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT;
+    attribs[3].offset = offsetof(Transform, rotation);
+    buffers[0].slot = 0;
+    buffers[0].pitch = sizeof(Voxel);
+    buffers[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    buffers[0].instance_step_rate = 0;
+    buffers[1].slot = 1;
+    buffers[1].pitch = sizeof(Transform);
+    buffers[1].input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
+    buffers[1].instance_step_rate = 0;
+    targets[0].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+    targets[1].format = swapchainTextureFormat;
+
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = shaders[ShaderModelVert];
+    info.fragment_shader = shaders[ShaderModelPOVFrag];
+    info.vertex_input_state.vertex_buffer_descriptions = buffers;
+    info.vertex_input_state.num_vertex_buffers = SDL_arraysize(buffers);
+    info.vertex_input_state.vertex_attributes = attribs;
+    info.vertex_input_state.num_vertex_attributes = SDL_arraysize(attribs);
+    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+    info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    info.depth_stencil_state.enable_depth_test = true;
+    info.depth_stencil_state.enable_depth_write = true;
+    info.target_info.color_target_descriptions = targets;
+    info.target_info.num_color_targets = SDL_arraysize(targets);
+    info.target_info.depth_stencil_format = depthTextureFormat;
+    info.target_info.has_depth_stencil_target = true;
+
+    graphicsPipelines[GraphicsPipelineModelPOV] = SDL_CreateGPUGraphicsPipeline(device, &info);
 }
 
 static bool CreateGraphicsPipelines()
 {
-    CreateModelGraphicsPipeline();
+    CreateModelPOVGraphicsPipeline();
 
     for (int i = 0; i < GraphicsPipelineCount; i++)
     {
@@ -834,6 +899,12 @@ bool RendererInit()
         return false;
     }
 
+    if (!CreateSamplers())
+    {
+        SDL_Log("Failed to create samplers");
+        return false;
+    }
+
     if (!CreateGraphicsPipelines())
     {
         SDL_Log("Failed to create graphics pipelines");
@@ -863,6 +934,18 @@ void RendererQuit()
         computePipelines[i] = nullptr;
     }
 
+    for (int i = 0; i < SamplerCount; i++)
+    {
+        SDL_ReleaseGPUSampler(device, samplers[i]);
+        samplers[i] = nullptr;
+    }
+
+    for (int i = 0; i < RenderTargetCount; i++)
+    {
+        SDL_ReleaseGPUTexture(device, renderTargets[i]);
+        renderTargets[i] = nullptr;
+    }
+
     for (int i = 0; i < RendererModelCount; i++)
     {
         models[i].Destroy();
@@ -879,6 +962,38 @@ void RendererQuit()
     textEngine = nullptr;
     device = nullptr;
     window = nullptr;
+}
+
+static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const char* name)
+{
+#ifndef NDEBUG
+    SDL_PushGPUDebugGroup(commandBuffer, name);
+#endif
+}
+
+static void PopDebugGroup(SDL_GPUCommandBuffer* commandBuffer)
+{
+#ifndef NDEBUG
+    SDL_PopGPUDebugGroup(commandBuffer);
+#endif
+}
+
+static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture* swapchainTexture)
+{
+    SDL_GPUBlitInfo info{};
+    info.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    info.source.texture = renderTargets[RenderTargetColorPOV];
+    info.source.x = 0;
+    info.source.y = 0;
+    info.source.w = renderTargetWidth;
+    info.source.h = renderTargetHeight;
+    info.destination.texture = swapchainTexture;
+    info.destination.x = 0;
+    info.destination.y = 0;
+    info.destination.w = swapchainWidth;
+    info.destination.h = swapchainHeight;
+    info.filter = SDL_GPU_FILTER_NEAREST;
+    SDL_BlitGPUTexture(commandBuffer, &info);
 }
 
 void RendererSubmit()
@@ -904,9 +1019,21 @@ void RendererSubmit()
 
     if (!swapchainTexture || !width || !height)
     {
+        /* can happen on e.g. window minimize */
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return;
     }
+
+    if (!ResizeRenderTargets(width, height))
+    {
+        SDL_Log("Failed to resize render targets");
+        SDL_SubmitGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
+    PushDebugGroup(commandBuffer, "BlitToSwapchain");
+    BlitToSwapchain(commandBuffer, swapchainTexture);
+    PopDebugGroup(commandBuffer);
 
     SDL_SubmitGPUCommandBuffer(commandBuffer);
 }
