@@ -2,6 +2,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <fast_obj.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
 
@@ -48,6 +49,7 @@ enum RenderTarget
 {
     RenderTargetPositionPOV,
     RenderTargetColorPOV,
+    RenderTargetDepthPOV,
     RenderTargetCount,
 };
 
@@ -62,6 +64,13 @@ static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
+static constexpr float POVSpeed = 1.0f;
+static constexpr float POVPitch = glm::radians(-45.0f);
+static constexpr float POVDistance = 100.0f;
+static constexpr float POVFOV = glm::radians(60.0f);
+static constexpr float POVNear = 0.1f;
+static constexpr float POVFar = 1000.0f;
+static constexpr glm::vec3 POVUp{0.0f, 1.0f, 0.0f};
 
 static constexpr std::string_view Shaders[] =
 {
@@ -644,7 +653,6 @@ struct Buffer
         {
             SDL_ReleaseGPUBuffer(device, buffer);
             buffer = nullptr;
-
             SDL_GPUBufferCreateInfo info{};
             info.usage = U;
             info.size = capacity * sizeof(T);
@@ -704,6 +712,9 @@ static int swapchainWidth;
 static int swapchainHeight;
 static int renderTargetWidth;
 static int renderTargetHeight;
+static glm::mat4 povViewProjMatrix;
+static glm::vec3 povPosition;
+static float povRotation;
 
 static bool CreateDevice()
 {
@@ -836,6 +847,15 @@ static bool ResizeRenderTargets(int width, int height)
         return false;
     }
 
+    info.format = depthTextureFormat;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    renderTargets[RenderTargetDepthPOV] = SDL_CreateGPUTexture(device, &info);
+    if (!renderTargets[RenderTargetDepthPOV])
+    {
+        SDL_Log("Failed to create render target: %s", SDL_GetError());
+        return false;
+    }
+
     swapchainWidth = width;
     swapchainHeight = height;
 
@@ -878,16 +898,16 @@ static void CreateModelPOVGraphicsPipeline()
     info.vertex_shader = shaders[ShaderModelVert];
     info.fragment_shader = shaders[ShaderModelPOVFrag];
     info.vertex_input_state.vertex_buffer_descriptions = buffers;
-    info.vertex_input_state.num_vertex_buffers = SDL_arraysize(buffers);
+    info.vertex_input_state.num_vertex_buffers = 2;
     info.vertex_input_state.vertex_attributes = attribs;
-    info.vertex_input_state.num_vertex_attributes = SDL_arraysize(attribs);
+    info.vertex_input_state.num_vertex_attributes = 4;
     info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
     info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
     info.depth_stencil_state.enable_depth_test = true;
     info.depth_stencil_state.enable_depth_write = true;
     info.target_info.color_target_descriptions = targets;
-    info.target_info.num_color_targets = SDL_arraysize(targets);
+    info.target_info.num_color_targets = 2;
     info.target_info.depth_stencil_format = depthTextureFormat;
     info.target_info.has_depth_stencil_target = true;
 
@@ -1054,15 +1074,48 @@ void RendererQuit()
     window = nullptr;
 }
 
+void RendererMove(const glm::vec3& position, float rotation)
+{
+    povViewProjMatrix = {};
+    if (renderTargetWidth < Epsilon || renderTargetHeight < Epsilon)
+    {
+        return;
+    }
+
+    povPosition = glm::mix(povPosition, position, POVSpeed);
+    povRotation = glm::mix(povRotation, rotation, POVSpeed);
+
+    glm::vec3 povForward;
+    povForward.x = std::cos(POVPitch) * std::cos(povRotation);
+    povForward.y = std::sin(POVPitch);
+    povForward.z = std::cos(POVPitch) * std::sin(povRotation);
+
+    float povRatio = static_cast<float>(renderTargetWidth) / renderTargetHeight;
+
+    glm::vec3 povEye = povPosition - povForward * POVDistance;
+    glm::vec3 povCenter = povEye + povForward;
+    glm::mat4 povViewMatrix = glm::lookAt(povEye, povCenter, POVUp);
+    glm::mat4 povProjMatrix = glm::perspective(POVFOV, povRatio, POVNear, POVFar);
+
+    povViewProjMatrix = povProjMatrix * povViewMatrix;
+}
+
 void RendererDraw(RendererModel model, const glm::vec3& position, float rotation)
 {
     modelInstances[model].Emplace(position, rotation);
 }
 
-static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const char* name)
+static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
 {
 #ifndef NDEBUG
-    SDL_PushGPUDebugGroup(commandBuffer, name);
+    SDL_PushGPUDebugGroup(commandBuffer, name.data());
+#endif
+}
+
+static void InsertDebugLabel(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
+{
+#ifndef NDEBUG
+    SDL_InsertGPUDebugLabel(commandBuffer, name.data());
 #endif
 }
 
@@ -1073,18 +1126,87 @@ static void PopDebugGroup(SDL_GPUCommandBuffer* commandBuffer)
 #endif
 }
 
+static void UploadModelInstances(SDL_GPUCommandBuffer* commandBuffer)
+{
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (!copyPass)
+    {
+        SDL_Log("Failed to begin copy pass: %s", SDL_GetError());
+        return;
+    }
+
+    for (int i = 0; i < RendererModelCount; i++)
+    {
+        modelInstances[i].Upload(copyPass);
+    }
+
+    SDL_EndGPUCopyPass(copyPass);
+}
+
+static void DrawPOVModelInstances(SDL_GPUCommandBuffer* commandBuffer)
+{
+    SDL_GPUColorTargetInfo colorTargets[2]{};
+    colorTargets[0].texture = renderTargets[RenderTargetPositionPOV];
+    colorTargets[0].load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTargets[0].store_op = SDL_GPU_STOREOP_STORE;
+    colorTargets[0].cycle = true;
+    colorTargets[1].texture = renderTargets[RenderTargetColorPOV];
+    colorTargets[1].load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTargets[1].store_op = SDL_GPU_STOREOP_STORE;
+    colorTargets[1].cycle = true;
+    SDL_GPUDepthStencilTargetInfo depthInfo{};
+    depthInfo.texture = renderTargets[RenderTargetDepthPOV];
+    depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthInfo.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+    depthInfo.store_op = SDL_GPU_STOREOP_STORE;
+    depthInfo.clear_depth = 1.0f;
+    depthInfo.cycle = true;
+
+    SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(commandBuffer, colorTargets, 2, &depthInfo);
+    if (!renderPass)
+    {
+        SDL_Log("Failed to begin render pass: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipelines[GraphicsPipelineModelPOV]);
+    SDL_PushGPUVertexUniformData(commandBuffer, 0, &povViewProjMatrix, 64);
+
+    for (int i = 0; i < RendererModelCount; i++)
+    {
+        Model& model = models[i];
+        Buffer<Transform>& modelInstance = modelInstances[i];
+        if (!modelInstance.size || !modelInstance.buffer)
+        {
+            continue;
+        }
+
+        SDL_GPUBufferBinding vertexBuffers[2]{};
+        SDL_GPUBufferBinding indexBuffer{};
+        SDL_GPUTextureSamplerBinding textureSampler{};
+        vertexBuffers[0].buffer = model.vertexBuffer;
+        vertexBuffers[1].buffer = modelInstance.buffer;
+        indexBuffer.buffer = model.indexBuffer;
+        textureSampler.texture = model.paletteTexture;
+        textureSampler.sampler = samplers[SamplerNearestClamp];
+        InsertDebugLabel(commandBuffer, Models[i]);
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBuffers, 2);
+        SDL_BindGPUIndexBuffer(renderPass, &indexBuffer, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureSampler, 1);
+        SDL_DrawGPUIndexedPrimitives(renderPass, model.indexCount, modelInstance.size, 0, 0, 0);
+    }
+
+    SDL_EndGPURenderPass(renderPass);
+}
+
 static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture* swapchainTexture)
 {
     SDL_GPUBlitInfo info{};
     info.load_op = SDL_GPU_LOADOP_DONT_CARE;
     info.source.texture = renderTargets[RenderTargetColorPOV];
-    info.source.x = 0;
-    info.source.y = 0;
     info.source.w = renderTargetWidth;
     info.source.h = renderTargetHeight;
     info.destination.texture = swapchainTexture;
-    info.destination.x = 0;
-    info.destination.y = 0;
     info.destination.w = swapchainWidth;
     info.destination.h = swapchainHeight;
     info.filter = SDL_GPU_FILTER_NEAREST;
@@ -1126,7 +1248,15 @@ void RendererSubmit()
         return;
     }
 
-    PushDebugGroup(commandBuffer, "BlitToSwapchain");
+    PushDebugGroup(commandBuffer, "upload_model_instances");
+    UploadModelInstances(commandBuffer);
+    PopDebugGroup(commandBuffer);
+
+    PushDebugGroup(commandBuffer, "draw_pov_model_instances");
+    DrawPOVModelInstances(commandBuffer);
+    PopDebugGroup(commandBuffer);
+
+    PushDebugGroup(commandBuffer, "blit_to_swapchain");
     BlitToSwapchain(commandBuffer, swapchainTexture);
     PopDebugGroup(commandBuffer);
 
