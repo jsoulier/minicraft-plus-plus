@@ -83,6 +83,8 @@ endfunction()
 add_shader(model.vert res/shaders/voxel.glsl)
 add_shader(model_pov.frag res/shaders/voxel.glsl)
 add_shader(readback.comp)
+add_shader(text.frag)
+add_shader(text.vert)
 
 function(add_model FILE)
     configure_file(res/models/${FILE}.obj ${BINARY_DIR} COPYONLY)

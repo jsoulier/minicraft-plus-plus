@@ -33,12 +33,15 @@ enum Shader
 {
     ShaderModelPovFrag,
     ShaderModelVert,
+    ShaderTextFrag,
+    ShaderTextVert,
     ShaderCount,
 };
 
 enum GraphicsPipeline
 {
     GraphicsPipelineModelPov,
+    GraphicsPipelineText,
     GraphicsPipelineCount,
 };
 
@@ -69,18 +72,20 @@ static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
 static constexpr const char* Font = "raster_forge.ttf";
 static constexpr int TextSequenceCount = 2;
+static constexpr glm::vec3 Up{0.0f, 1.0f, 0.0f};
 static constexpr float PovSpeed = 1.0f;
 static constexpr float PovPitch = glm::radians(-45.0f);
 static constexpr float PovDistance = 100.0f;
 static constexpr float PovFov = glm::radians(60.0f);
 static constexpr float PovNear = 0.1f;
 static constexpr float PovFar = 1000.0f;
-static constexpr glm::vec3 Up{0.0f, 1.0f, 0.0f};
 
 static constexpr std::string_view Shaders[] =
 {
     "model_pov.frag",
     "model.vert",
+    "text.frag",
+    "text.vert",
 };
 
 static constexpr std::string_view ComputePipelines[] =
@@ -869,7 +874,7 @@ struct TextValue
                 return;
             }
 
-            info.size = indexCount * sizeof(uint32_t);
+            info.size = indexCount * sizeof(uint16_t);
             indexTransferBuffer = SDL_CreateGPUTransferBuffer(device, &info);
             if (!indexTransferBuffer)
             {
@@ -879,7 +884,7 @@ struct TextValue
         }
 
         TextVertex* vertexData = static_cast<TextVertex*>(SDL_MapGPUTransferBuffer(device, vertexTransferBuffer, false));
-        uint32_t* indexData = static_cast<uint32_t*>(SDL_MapGPUTransferBuffer(device, indexTransferBuffer, false));
+        uint16_t* indexData = static_cast<uint16_t*>(SDL_MapGPUTransferBuffer(device, indexTransferBuffer, false));
         if (!vertexData || !indexData)
         {
             SDL_Log("Failed to map transfer buffer(s): %s", SDL_GetError());
@@ -907,6 +912,11 @@ struct TextValue
                 vertexData[vertexCount + i].texcoord.y = sequence->uv[i].y;
             }
 
+            for (int i = 0; i < sequence->num_indices; i++)
+            {
+                indexData[indexCount + i] = sequence->indices[i] + vertexCount;
+            }
+
             vertexCount += sequence->num_vertices;
             indexCount += sequence->num_indices;
             sequenceCount++;
@@ -928,7 +938,7 @@ struct TextValue
             }
 
             info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-            info.size = indexCount * sizeof(uint32_t);
+            info.size = indexCount * sizeof(uint16_t);
             indexBuffer = SDL_CreateGPUBuffer(device, &info);
             if (!indexBuffer)
             {
@@ -945,7 +955,7 @@ struct TextValue
         SDL_UploadToGPUBuffer(copyPass, &location, &region, false);
         location.transfer_buffer = indexTransferBuffer;
         region.buffer = indexBuffer;
-        region.size = indexCount * sizeof(uint32_t);
+        region.size = indexCount * sizeof(uint16_t);
         SDL_UploadToGPUBuffer(copyPass, &location, &region, false);
         SDL_ReleaseGPUTransferBuffer(device, vertexTransferBuffer);
         SDL_ReleaseGPUTransferBuffer(device, indexTransferBuffer);
@@ -989,6 +999,7 @@ static int renderTargetHeight;
 static glm::mat4 povViewProjMatrix;
 static glm::vec3 povPosition;
 static float povRotation;
+static glm::mat4 renderTargetProjMatrix;
 
 static void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, const std::string_view& name)
 {
@@ -1151,6 +1162,9 @@ static bool ResizeRenderTargets(int width, int height)
         return false;
     }
 
+     renderTargetProjMatrix = glm::ortho(0.0f, static_cast<float>(renderTargetWidth),
+         0.0f, static_cast<float>(renderTargetHeight), -1.0f, 1.0f);
+
     swapchainWidth = width;
     swapchainHeight = height;
 
@@ -1209,9 +1223,49 @@ static void CreateModelPovGraphicsPipeline()
     graphicsPipelines[GraphicsPipelineModelPov] = SDL_CreateGPUGraphicsPipeline(device, &info);
 }
 
+static void CreateTextGraphicsPipeline()
+{
+    SDL_GPUVertexAttribute attribs[2]{};
+    SDL_GPUVertexBufferDescription buffers[1]{};
+    SDL_GPUColorTargetDescription targets[1]{};
+    attribs[0].location = 0;
+    attribs[0].buffer_slot = 0;
+    attribs[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    attribs[0].offset = offsetof(TextVertex, position);
+    attribs[1].location = 1;
+    attribs[1].buffer_slot = 0;
+    attribs[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    attribs[1].offset = offsetof(TextVertex, texcoord);
+    buffers[0].slot = 0;
+    buffers[0].pitch = sizeof(TextVertex);
+    buffers[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    buffers[0].instance_step_rate = 0;
+    targets[0].format = swapchainTextureFormat;
+    targets[0].blend_state.enable_blend = true;
+    targets[0].blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    targets[0].blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    targets[0].blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    targets[0].blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_DST_ALPHA;
+    targets[0].blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    targets[0].blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = shaders[ShaderTextVert];
+    info.fragment_shader = shaders[ShaderTextFrag];
+    info.vertex_input_state.vertex_buffer_descriptions = buffers;
+    info.vertex_input_state.num_vertex_buffers = 1;
+    info.vertex_input_state.vertex_attributes = attribs;
+    info.vertex_input_state.num_vertex_attributes = 2;
+    info.target_info.color_target_descriptions = targets;
+    info.target_info.num_color_targets = 1;
+
+    graphicsPipelines[GraphicsPipelineText] = SDL_CreateGPUGraphicsPipeline(device, &info);
+}
+
 static bool CreateGraphicsPipelines()
 {
     CreateModelPovGraphicsPipeline();
+    CreateTextGraphicsPipeline();
 
     for (int i = 0; i < GraphicsPipelineCount; i++)
     {
@@ -1526,9 +1580,50 @@ static void DrawPovModelInstances(SDL_GPUCommandBuffer* commandBuffer)
 
 static void DrawTextInstances(SDL_GPUCommandBuffer* commandBuffer)
 {
-    /* TODO: */
+    SDL_GPUColorTargetInfo colorTarget{};
+    colorTarget.texture = renderTargets[RenderTargetColorPov];
+    colorTarget.load_op = SDL_GPU_LOADOP_LOAD;
+    colorTarget.store_op = SDL_GPU_STOREOP_STORE;
 
-    /* TODO: make sure to skip if failed is true */
+    SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTarget, 1, nullptr);
+    if (!renderPass)
+    {
+        SDL_Log("Failed to begin render pass: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipelines[GraphicsPipelineText]);
+    SDL_PushGPUVertexUniformData(commandBuffer, 0, &renderTargetProjMatrix, 64);
+
+    for (const TextInstance& textInstance : textInstances)
+    {
+        TextValue& textValue = textValues[textInstance.valueIndex];
+        if (textValue.failed)
+        {
+            continue;
+        }
+
+        SDL_GPUBufferBinding vertexBuffer{};
+        SDL_GPUBufferBinding indexBuffer{};
+        vertexBuffer.buffer = textValue.vertexBuffer;
+        indexBuffer.buffer = textValue.indexBuffer;
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBuffer, 1);
+        SDL_BindGPUIndexBuffer(renderPass, &indexBuffer, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+        SDL_PushGPUVertexUniformData(commandBuffer, 1, &textInstance.position, 8);
+        SDL_PushGPUFragmentUniformData(commandBuffer, 0, &textInstance.color, 16);
+
+        for (int i = 0; i < textValue.sequenceCount; i++)
+        {
+            TextSequence& textSequence = textValue.sequences[i];
+            SDL_GPUTextureSamplerBinding textureSampler{};
+            textureSampler.texture = textSequence.atlasTexture;
+            textureSampler.sampler = samplers[SamplerNearestClamp];
+            SDL_BindGPUFragmentSamplers(renderPass, 0, &textureSampler, 1);
+            SDL_DrawGPUIndexedPrimitives(renderPass, textSequence.indexCount, 1, textSequence.firstIndex, 0, 0);
+        }
+    }
+
+    SDL_EndGPURenderPass(renderPass);
 }
 
 static void BlitToSwapchain(SDL_GPUCommandBuffer* commandBuffer, SDL_GPUTexture* swapchainTexture)

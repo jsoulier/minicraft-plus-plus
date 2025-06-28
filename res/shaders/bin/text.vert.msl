@@ -1,0 +1,35 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct uniformProjMatrix
+{
+    float4x4 projMatrix;
+};
+
+struct uniformPosition
+{
+    float2 position;
+};
+
+struct main0_out
+{
+    float2 outTexcoord [[user(locn0)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float2 inPosition [[attribute(0)]];
+    float2 inTexcoord [[attribute(1)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], constant uniformProjMatrix& _25 [[buffer(0)]], constant uniformPosition& _33 [[buffer(1)]])
+{
+    main0_out out = {};
+    out.outTexcoord = in.inTexcoord;
+    out.gl_Position = _25.projMatrix * float4(in.inPosition + _33.position, 0.0, 1.0);
+    return out;
+}
+

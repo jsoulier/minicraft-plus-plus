@@ -1,0 +1,27 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct uniformColor
+{
+    float4 color;
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 inTexcoord [[user(locn0)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], constant uniformColor& _12 [[buffer(0)]], texture2d<float> atlasTexture [[texture(0)]], sampler atlasTextureSmplr [[sampler(0)]])
+{
+    main0_out out = {};
+    out.outColor = _12.color * atlasTexture.sample(atlasTextureSmplr, in.inTexcoord);
+    return out;
+}
+

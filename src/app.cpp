@@ -27,11 +27,22 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result)
 SDL_AppResult SDL_AppIterate(void* appstate)
 {
     static float i = 0.0f;
-    i += 0.01f;
+    i += 0.002f;
 
     RendererMove({}, i);
     RendererDraw(RendererModelGrass, {}, -i);
-    RendererDraw("Hello World!", {100.0f, 100.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, 16);
+    RendererDraw(RendererModelGrass, {100.0f, 0.0f, 0.0f}, -i);
+    RendererDraw(RendererModelGrass, {-100.0f, 0.0f, 0.0f}, -i);
+    RendererDraw(RendererModelGrass, {0.0f, 0.0f, 100.0f}, -i);
+    RendererDraw(RendererModelGrass, {0.0f, 0.0f, -100.0f}, -i);
+    RendererDraw(RendererModelGrass, {-100.0f, 0.0f, -100.0f}, -i);
+    RendererDraw(RendererModelGrass, {-100.0f, 0.0f, 100.0f}, -i);
+    RendererDraw(RendererModelGrass, {100.0f, 0.0f, -100.0f}, -i);
+    RendererDraw(RendererModelGrass, {100.0f, 0.0f, 100.0f}, -i);
+    RendererDraw("Testing\nTesting", {100.0f, 100.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, 16);
+    RendererDraw("Testing\nTesting v2", {100.0f, 600.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, 16);
+    RendererDraw("Testing\nTesting", {800.0f, 600.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, 16);
+    RendererDraw("Testing\nTesting v2", {800.0f, 100.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, 16);
     RendererSubmit();
 
     return SDL_APP_CONTINUE;
