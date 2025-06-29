@@ -8,7 +8,6 @@
 #include <glm/gtx/hash.hpp>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
-
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -26,7 +25,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 #include "renderer.hpp"
 
 enum Shader
@@ -70,6 +68,7 @@ static constexpr float Epsilon = std::numeric_limits<float>::epsilon();
 static constexpr const char* Title = "Minicraft++";
 static constexpr int WindowWidth = 960;
 static constexpr int WindowHeight = 720;
+static constexpr float Resolution = 0.5f;
 static constexpr const char* Font = "raster_forge.ttf";
 static constexpr int TextSequenceCount = 2;
 static constexpr glm::vec3 Up{0.0f, 1.0f, 0.0f};
@@ -1126,8 +1125,8 @@ static bool ResizeRenderTargets(int width, int height)
         renderTargets[i] = nullptr;
     }
 
-    renderTargetWidth = width;
-    renderTargetHeight = height;
+    renderTargetWidth = width * Resolution;
+    renderTargetHeight = height * Resolution;
 
     SDL_GPUTextureCreateInfo info{};
     info.width = renderTargetWidth;
@@ -1415,6 +1414,13 @@ void RendererQuit()
     {
         textValue.Destroy();
     }
+    textValues.clear();
+
+    for (auto& [size, font] : fonts)
+    {
+        TTF_CloseFont(font);
+    }
+    fonts.clear();
 
     TTF_DestroyGPUTextEngine(textEngine);
     TTF_Quit();

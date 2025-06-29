@@ -15,9 +15,11 @@ add_subdirectory(lib/SDL_ttf)
 add_subdirectory(lib/fast_obj)
 add_subdirectory(lib/glm)
 add_subdirectory(lib/json)
+add_subdirectory(lib/sqlite3)
 add_subdirectory(lib/stb)
 add_executable(minicraft++ WIN32
     src/app.cpp
+    src/database.cpp
     src/renderer.cpp
 )
 set_target_properties(minicraft++ PROPERTIES CXX_STANDARD 23)
@@ -26,6 +28,7 @@ target_link_libraries(minicraft++ PRIVATE SDL3_ttf::SDL3_ttf)
 target_link_libraries(minicraft++ PRIVATE fast_obj)
 target_link_libraries(minicraft++ PRIVATE glm-header-only)
 target_link_libraries(minicraft++ PRIVATE nlohmann_json)
+target_link_libraries(minicraft++ PRIVATE sqlite3)
 target_link_libraries(minicraft++ PRIVATE stb)
 
 function(add_shader FILE)

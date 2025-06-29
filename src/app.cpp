@@ -1,8 +1,14 @@
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-
+#include <string_view>
+#include "database.hpp"
 #include "renderer.hpp"
+
+static constexpr std::string_view SaveFileName = "minicraft++";
+
+ /* TODO: log to a file */
+static constexpr std::string_view LogFile = "minicraft++.log";
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 {
@@ -16,11 +22,18 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
         return SDL_APP_FAILURE;
     }
 
+    if (!DatabaseInit(SaveFileName))
+    {
+        SDL_Log("Failed to initialize database: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
     return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void* appstate, SDL_AppResult result)
 {
+    DatabaseQuit();
     RendererQuit();
 }
 
