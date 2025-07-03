@@ -3,7 +3,15 @@
 
 using namespace metal;
 
-fragment void main0()
+struct main0_out
 {
+    float4 outColor [[color(0)]];
+};
+
+fragment main0_out main0()
+{
+    main0_out out = {};
+    out.outColor = float4(1.0, 0.0, 0.0, 1.0);
+    return out;
 }
 

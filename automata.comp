@@ -5,8 +5,78 @@
 layout(local_size_x = THREADS, local_size_y = THREADS, local_size_z = THREADS) in;
 layout(set = 0, binding = 0, r8ui) uniform readonly uimage3D inCells;
 layout(set = 1, binding = 0, r8ui) uniform writeonly uimage3D outCells;
+layout(set = 2, binding = 0) uniform uniformRules
+{
+    uint survival;
+    uint birth;
+    uint state;
+    uint neighborhood;
+    uint frame;
+};
+
+const ivec3 Moore[26] = ivec3[](
+    ivec3(-1,-1,-1), ivec3( 0,-1,-1), ivec3( 1,-1,-1),
+    ivec3(-1, 0,-1), ivec3( 0, 0,-1), ivec3( 1, 0,-1),
+    ivec3(-1, 1,-1), ivec3( 0, 1,-1), ivec3( 1, 1,-1),
+    ivec3(-1,-1, 0), ivec3( 0,-1, 0), ivec3( 1,-1, 0),
+    ivec3(-1, 0, 0),                  ivec3( 1, 0, 0),
+    ivec3(-1, 1, 0), ivec3( 0, 1, 0), ivec3( 1, 1, 0),
+    ivec3(-1,-1, 1), ivec3( 0,-1, 1), ivec3( 1,-1, 1),
+    ivec3(-1, 0, 1), ivec3( 0, 0, 1), ivec3( 1, 0, 1),
+    ivec3(-1, 1, 1), ivec3( 0, 1, 1), ivec3( 1, 1, 1)
+);
+
+const ivec3 VonNeumann[6] = ivec3[](
+    ivec3(-1, 0, 0),
+    ivec3( 1, 0, 0),
+    ivec3( 0,-1, 0),
+    ivec3( 0, 1, 0),
+    ivec3( 0, 0,-1),
+    ivec3( 0, 0, 1)
+);
 
 void main()
 {
-    
+    ivec3 id = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(id, ivec3(BOUNDS))))
+    {
+        return;
+    }
+    uint neighbors = 0;
+    switch (neighborhood)
+    {
+    case MOORE:
+        for (int i = 0; i < 26; i++)
+        {
+            ivec3 neighborId = id + Moore[i];
+            if (any(lessThan(neighborId, ivec3(0))) || any(greaterThanEqual(neighborId, ivec3(BOUNDS))))
+            {
+                continue;
+            }
+            neighbors += uint(imageLoad(inCells, neighborId).x > 0);
+        }
+        break;
+    case VON_NEUMANN:
+        for (int i = 0; i < 6; i++)
+        {
+            ivec3 neighborId = id + VonNeumann[i];
+            if (any(lessThan(neighborId, ivec3(0))) || any(greaterThanEqual(neighborId, ivec3(BOUNDS))))
+            {
+                continue;
+            }
+            neighbors += uint(imageLoad(inCells, neighborId).x > 0);
+        }
+        break;
+    }
+    int count = int(imageLoad(inCells, id).x);
+    if (neighbors != survival)
+    {
+        count--;
+    }
+    if (neighbors == birth)
+    {
+        count = int(state);
+    }
+    count = max(0, count);
+    imageStore(outCells, id, uvec4(count));
 }

@@ -20,10 +20,22 @@ static SDL_GPUComputePipeline* computePipeline;
 static SDL_GPUTexture* textures[FRAMES];
 static SDL_GPUBuffer* vertexBuffer;
 static SDL_GPUBuffer* instanceBuffer;
+
+struct
+{
+    uint32_t survival{4};
+    uint32_t birth{4};
+    uint32_t state{5};
+    uint32_t neighborhood{MOORE};
+    uint32_t frame{0};
+}
+static rules;
+
 static float pitch;
 static float yaw;
 static float distance;
-static int frame;
+static int readFrame{0};
+static int writeFrame{1};
 
 static bool Init()
 {
@@ -40,7 +52,9 @@ static bool Init()
         SDL_Log("Failed to create window: %s", SDL_GetError());
         return false;
     }
-#if SDL_PLATFORM_APPLE
+#if defined(SDL_PLATFORM_WIN32)
+    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL, true, nullptr);
+#elif defined(SDL_PLATFORM_APPLE)
     device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, true, nullptr);
 #else
     device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
@@ -143,7 +157,7 @@ static bool CreateResources()
     {
         SDL_GPUTextureCreateInfo info{};
         info.type = SDL_GPU_TEXTURETYPE_3D;
-        info.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+        info.format = SDL_GPU_TEXTUREFORMAT_R8_UINT;
         info.usage =
             SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |
             SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE |
@@ -320,10 +334,25 @@ static void Draw()
     io.DisplaySize.y = height;
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui::NewFrame();
-    ImGui::ShowDemoWindow();
     ImGui::Render();
     ImDrawData* drawData = ImGui::GetDrawData();
     ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commandBuffer);
+    {
+        SDL_GPUStorageTextureReadWriteBinding textureBinding{};
+        textureBinding.texture = textures[writeFrame];
+        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &textureBinding, 1, nullptr, 0);
+        if (!computePass)
+        {
+            SDL_Log("Failed to begin compute pass: %s", SDL_GetError());
+            SDL_SubmitGPUCommandBuffer(commandBuffer);
+            return;
+        }
+        SDL_BindGPUComputePipeline(computePass, computePipeline);
+        SDL_BindGPUComputeStorageTextures(computePass, 0, &textures[readFrame], 1);
+        int groups = (BOUNDS + THREADS - 1) / THREADS;
+        SDL_DispatchGPUCompute(computePass, groups, groups, groups);
+        SDL_EndGPUComputePass(computePass);
+    }
     {
         SDL_GPUColorTargetInfo info{};
         info.texture = texture;
@@ -378,7 +407,9 @@ int main(int argc, char** argv)
             break;
         }
         Draw();
-        frame = (frame + 1) % FRAMES;
+        readFrame = (readFrame + 1) % FRAMES;
+        writeFrame = (writeFrame + 1) % FRAMES;
+        rules.frame++;
     }
     for (int i = 0; i < FRAMES; i++)
     {
