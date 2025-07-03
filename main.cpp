@@ -1,5 +1,8 @@
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
@@ -18,8 +21,16 @@ static SDL_GPUDevice* device;
 static SDL_GPUGraphicsPipeline* graphicsPipeline;
 static SDL_GPUComputePipeline* computePipeline;
 static SDL_GPUTexture* textures[FRAMES];
+static int readFrame{0};
+static int writeFrame{1};
 static SDL_GPUBuffer* vertexBuffer;
 static SDL_GPUBuffer* instanceBuffer;
+static SDL_GPUTexture* depthTexture;
+static int depthTextureWidth;
+static int depthTextureHeight;
+static float pitch;
+static float yaw;
+static float distance{500.0f};
 
 struct
 {
@@ -30,12 +41,6 @@ struct
     uint32_t frame{0};
 }
 static rules;
-
-static float pitch;
-static float yaw;
-static float distance;
-static int readFrame{0};
-static int writeFrame{1};
 
 static bool Init()
 {
@@ -127,6 +132,11 @@ static bool CreatePipelines()
     info.vertex_input_state.num_vertex_attributes = 2;
     info.target_info.color_target_descriptions = targets;
     info.target_info.num_color_targets = 1;
+    info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.target_info.has_depth_stencil_target = true;
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    info.depth_stencil_state.enable_depth_test = true;
+    info.depth_stencil_state.enable_depth_write = true;
     graphicsPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
     computePipeline = LoadComputePipeline(device, "automata.comp");
     if (!graphicsPipeline || !computePipeline)
@@ -329,6 +339,39 @@ static void Draw()
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return;
     }
+    if (width != depthTextureWidth || height != depthTextureHeight)
+    {
+        SDL_ReleaseGPUTexture(device, depthTexture);
+        SDL_GPUTextureCreateInfo info{};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+        info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.props = SDL_CreateProperties();
+        SDL_SetFloatProperty(info.props, SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_DEPTH_FLOAT, 1.0f);
+        depthTexture = SDL_CreateGPUTexture(device, &info);
+        SDL_DestroyProperties(info.props);
+        if (!depthTexture)
+        {
+            SDL_Log("Failed to create texture: %s", SDL_GetError());
+            SDL_SubmitGPUCommandBuffer(commandBuffer);
+            return;
+        }
+        depthTextureWidth = width;
+        depthTextureHeight = height;
+    }
+    glm::vec3 vector;
+    vector.x = std::cos(pitch) * std::cos(yaw);
+    vector.y = std::sin(pitch);
+    vector.z = std::cos(pitch) * std::sin(yaw);
+    float ratio = static_cast<float>(width) / height;
+    glm::vec3 position = -vector * distance;
+    glm::mat4 view = glm::lookAt(position, position + vector, glm::vec3{0.0f, 1.0f, 0.0f});
+    glm::mat4 proj = glm::perspective(FOV, ratio, NEAR, FAR);
+    glm::mat4 viewProjMatrix = proj * view;
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize.x = width;
     io.DisplaySize.y = height;
@@ -348,15 +391,46 @@ static void Draw()
             return;
         }
         SDL_BindGPUComputePipeline(computePass, computePipeline);
+        SDL_PushGPUComputeUniformData(commandBuffer, 0, &rules, sizeof(rules));
         SDL_BindGPUComputeStorageTextures(computePass, 0, &textures[readFrame], 1);
         int groups = (BOUNDS + THREADS - 1) / THREADS;
         SDL_DispatchGPUCompute(computePass, groups, groups, groups);
         SDL_EndGPUComputePass(computePass);
     }
     {
+        SDL_GPUColorTargetInfo colorInfo{};
+        SDL_GPUDepthStencilTargetInfo depthInfo{};
+        colorInfo.texture = texture;
+        colorInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+        colorInfo.store_op = SDL_GPU_STOREOP_STORE;
+        depthInfo.texture = depthTexture;
+        depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+        depthInfo.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+        depthInfo.store_op = SDL_GPU_STOREOP_STORE;
+        depthInfo.clear_depth = 1.0f;
+        depthInfo.cycle = true;
+        SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorInfo, 1, &depthInfo);
+        if (!renderPass)
+        {
+            SDL_Log("Failed to begin render pass: %s", SDL_GetError());
+            SDL_SubmitGPUCommandBuffer(commandBuffer);
+            return;
+        }
+        SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+        SDL_GPUBufferBinding vertexBuffers[2]{};
+        vertexBuffers[0].buffer = vertexBuffer;
+        vertexBuffers[1].buffer = instanceBuffer;
+        /* TODO: read or write, which is better? */
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBuffers, 2);
+        SDL_BindGPUVertexStorageTextures(renderPass, 0, &textures[writeFrame], 1);
+        SDL_PushGPUVertexUniformData(commandBuffer, 0, &viewProjMatrix, sizeof(viewProjMatrix));
+        SDL_DrawGPUPrimitives(renderPass, 36, BOUNDS * BOUNDS * BOUNDS, 0, 0);
+        SDL_EndGPURenderPass(renderPass);
+    }
+    {
         SDL_GPUColorTargetInfo info{};
         info.texture = texture;
-        info.load_op = SDL_GPU_LOADOP_CLEAR;
+        info.load_op = SDL_GPU_LOADOP_LOAD;
         info.store_op = SDL_GPU_STOREOP_STORE;
         SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(commandBuffer, &info, 1, nullptr);
         if (!renderPass)
@@ -415,6 +489,7 @@ int main(int argc, char** argv)
     {
         SDL_ReleaseGPUTexture(device, textures[i]);
     }
+    SDL_ReleaseGPUTexture(device, depthTexture);
     SDL_ReleaseGPUBuffer(device, vertexBuffer);
     SDL_ReleaseGPUBuffer(device, instanceBuffer);
     ImGui_ImplSDLGPU3_Shutdown();

@@ -37,6 +37,7 @@ const ivec3 VonNeumann[6] = ivec3[](
 
 void main()
 {
+    /*
     ivec3 id = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(id, ivec3(BOUNDS))))
     {
@@ -79,4 +80,12 @@ void main()
     }
     count = max(0, count);
     imageStore(outCells, id, uvec4(count));
+    */
+    
+    ivec3 id = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(id, ivec3(BOUNDS))))
+    {
+        return;
+    }
+    imageStore(outCells, id, uvec4(1));
 }

@@ -13,7 +13,7 @@ make_directory(${BINARY_DIR})
 set(GLM_BUILD_LIBRARY FALSE)
 add_subdirectory(SDL)
 add_subdirectory(glm)
-add_executable(automata
+add_executable(automata WIN32
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
     imgui/imgui_draw.cpp
