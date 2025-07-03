@@ -13,5 +13,7 @@
 #define FOV 1.0f
 #define NEAR 0.1f
 #define FAR 1000.0f
+#define PAN 0.002f
+#define ZOOM 20.0f
 
 #endif

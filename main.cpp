@@ -368,7 +368,8 @@ static void Draw()
     vector.y = std::sin(pitch);
     vector.z = std::cos(pitch) * std::sin(yaw);
     float ratio = static_cast<float>(width) / height;
-    glm::vec3 position = -vector * distance;
+    glm::vec3 center = glm::vec3{BOUNDS / 2};
+    glm::vec3 position = center - vector * distance;
     glm::mat4 view = glm::lookAt(position, position + vector, glm::vec3{0.0f, 1.0f, 0.0f});
     glm::mat4 proj = glm::perspective(FOV, ratio, NEAR, FAR);
     glm::mat4 viewProjMatrix = proj * view;
@@ -473,6 +474,16 @@ int main(int argc, char** argv)
             {
             case SDL_EVENT_QUIT:
                 running = false;
+                break;
+            case SDL_EVENT_MOUSE_MOTION:
+                if (event.motion.state & SDL_BUTTON_LMASK)
+                {
+                    yaw += event.motion.xrel * PAN;
+                    pitch -= event.motion.yrel * PAN;
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                distance -= event.wheel.y * ZOOM;
                 break;
             }
         }
