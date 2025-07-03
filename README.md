@@ -2,7 +2,7 @@
 
 ![](image.png)
 
-3D Cellular Automata simulation using SDL3 GPU with compute shaders
+3D Cellular Automata using SDL3 GPU with compute shaders
 
 #### Windows
 

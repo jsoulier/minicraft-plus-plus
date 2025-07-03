@@ -1,5 +1,6 @@
 #version 450
 
+#include "FastNoiseLite.glsl"
 #include "config.hpp"
 
 layout(local_size_x = THREADS, local_size_y = THREADS, local_size_z = THREADS) in;
@@ -45,8 +46,12 @@ void main()
     }
     if (frame == 0)
     {
-        uint hash = id.x * 73856093 ^ id.y * 19349663 ^ id.z * 83492791 ^ seed;
-        imageStore(outCells, id, uvec4(hash % 100 == 0));
+        float frequency = 0.1f;
+        float x = float(id.x) * frequency;
+        float y = float(id.y) * frequency;
+        float z = float(id.z) * frequency;
+        float value = _fnlSinglePerlin3D(int(seed), x, y, z);
+        imageStore(outCells, id, uvec4(value > 0.65f));
         return;
     }
     if (frame == 1)
