@@ -44,27 +44,113 @@ struct spvUnsafeArray
     }
 };
 
-constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u);
-
 struct uniformRules
 {
-    uint survival;
-    uint birth;
-    uint state;
+    uint seed;
+    uint surviveMask;
+    uint birthMask;
+    uint life;
     uint neighborhood;
     uint frame;
 };
 
-constant spvUnsafeArray<int3, 26> _71 = spvUnsafeArray<int3, 26>({ int3(-1), int3(0, -1, -1), int3(1, -1, -1), int3(-1, 0, -1), int3(0, 0, -1), int3(1, 0, -1), int3(-1, 1, -1), int3(0, 1, -1), int3(1, 1, -1), int3(-1, -1, 0), int3(0, -1, 0), int3(1, -1, 0), int3(-1, 0, 0), int3(1, 0, 0), int3(-1, 1, 0), int3(0, 1, 0), int3(1, 1, 0), int3(-1, -1, 1), int3(0, -1, 1), int3(1, -1, 1), int3(-1, 0, 1), int3(0, 0, 1), int3(1, 0, 1), int3(-1, 1, 1), int3(0, 1, 1), int3(1) });
-constant spvUnsafeArray<int3, 6> _74 = spvUnsafeArray<int3, 6>({ int3(-1, 0, 0), int3(1, 0, 0), int3(0, -1, 0), int3(0, 1, 0), int3(0, 0, -1), int3(0, 0, 1) });
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u);
 
-kernel void main0(texture3d<uint, access::write> outCells [[texture(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+constant spvUnsafeArray<int3, 26> _140 = spvUnsafeArray<int3, 26>({ int3(-1), int3(0, -1, -1), int3(1, -1, -1), int3(-1, 0, -1), int3(0, 0, -1), int3(1, 0, -1), int3(-1, 1, -1), int3(0, 1, -1), int3(1, 1, -1), int3(-1, -1, 0), int3(0, -1, 0), int3(1, -1, 0), int3(-1, 0, 0), int3(1, 0, 0), int3(-1, 1, 0), int3(0, 1, 0), int3(1, 1, 0), int3(-1, -1, 1), int3(0, -1, 1), int3(1, -1, 1), int3(-1, 0, 1), int3(0, 0, 1), int3(1, 0, 1), int3(-1, 1, 1), int3(0, 1, 1), int3(1) });
+constant spvUnsafeArray<int3, 6> _185 = spvUnsafeArray<int3, 6>({ int3(-1, 0, 0), int3(1, 0, 0), int3(0, -1, 0), int3(0, 1, 0), int3(0, 0, -1), int3(0, 0, 1) });
+
+kernel void main0(constant uniformRules& _28 [[buffer(0)]], texture3d<uint> inCells [[texture(0)]], texture3d<uint, access::write> outCells [[texture(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     int3 id = int3(gl_GlobalInvocationID);
     if (any(id >= int3(128)))
     {
         return;
     }
-    outCells.write(uint4(1u), uint3(id));
+    if (_28.frame == 0u)
+    {
+        uint hash = uint(((id.x * 73856093) ^ (id.y * 19349663)) ^ (id.z * 83492791)) ^ _28.seed;
+        outCells.write(uint4(uint((hash % 100u) == 0u)), uint3(id));
+        return;
+    }
+    if (_28.frame == 1u)
+    {
+        int value = int(inCells.read(uint3(id)).x);
+        outCells.write(uint4(uint(value)), uint3(id));
+        return;
+    }
+    uint neighbors = 0u;
+    switch (_28.neighborhood)
+    {
+        case 0u:
+        {
+            for (int i = 0; i < 26; i++)
+            {
+                int3 neighborId = id + _140[i];
+                bool _150 = any(neighborId < int3(0));
+                bool _157;
+                if (!_150)
+                {
+                    _157 = any(neighborId >= int3(128));
+                }
+                else
+                {
+                    _157 = _150;
+                }
+                if (_157)
+                {
+                    continue;
+                }
+                neighbors += uint(inCells.read(uint3(neighborId)).x > 0u);
+            }
+            break;
+        }
+        case 1u:
+        {
+            for (int i_1 = 0; i_1 < 6; i_1++)
+            {
+                int3 neighborId_1 = id + _185[i_1];
+                bool _194 = any(neighborId_1 < int3(0));
+                bool _201;
+                if (!_194)
+                {
+                    _201 = any(neighborId_1 >= int3(128));
+                }
+                else
+                {
+                    _201 = _194;
+                }
+                if (_201)
+                {
+                    continue;
+                }
+                neighbors += uint(inCells.read(uint3(neighborId_1)).x > 0u);
+            }
+            break;
+        }
+    }
+    int value_1 = int(inCells.read(uint3(id)).x);
+    bool _224 = value_1 == 0;
+    bool _234;
+    if (_224)
+    {
+        _234 = (_28.birthMask & (1u << neighbors)) != 0u;
+    }
+    else
+    {
+        _234 = _224;
+    }
+    if (_234)
+    {
+        value_1 = int(_28.life);
+    }
+    else
+    {
+        if ((_28.surviveMask & (1u << neighbors)) == 0u)
+        {
+            value_1--;
+        }
+    }
+    value_1 = max(0, value_1);
+    outCells.write(uint4(uint(value_1)), uint3(id));
 }
 

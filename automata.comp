@@ -7,9 +7,10 @@ layout(set = 0, binding = 0, r8ui) uniform readonly uimage3D inCells;
 layout(set = 1, binding = 0, r8ui) uniform writeonly uimage3D outCells;
 layout(set = 2, binding = 0) uniform uniformRules
 {
-    uint survival;
-    uint birth;
-    uint state;
+    uint seed;
+    uint surviveMask;
+    uint birthMask;
+    uint life;
     uint neighborhood;
     uint frame;
 };
@@ -37,10 +38,21 @@ const ivec3 VonNeumann[6] = ivec3[](
 
 void main()
 {
-    /*
     ivec3 id = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(id, ivec3(BOUNDS))))
     {
+        return;
+    }
+    if (frame == 0)
+    {
+        uint hash = id.x * 73856093 ^ id.y * 19349663 ^ id.z * 83492791 ^ seed;
+        imageStore(outCells, id, uvec4(hash % 100 == 0));
+        return;
+    }
+    if (frame == 1)
+    {
+        int value = int(imageLoad(inCells, id).x);
+        imageStore(outCells, id, uvec4(value));
         return;
     }
     uint neighbors = 0;
@@ -69,23 +81,15 @@ void main()
         }
         break;
     }
-    int count = int(imageLoad(inCells, id).x);
-    if (neighbors != survival)
+    int value = int(imageLoad(inCells, id).x);
+    if (value == 0 && ((birthMask & (1u << neighbors)) != 0))
     {
-        count--;
+        value = int(life);
     }
-    if (neighbors == birth)
+    else if ((surviveMask & (1u << neighbors)) == 0)
     {
-        count = int(state);
+        value--;
     }
-    count = max(0, count);
-    imageStore(outCells, id, uvec4(count));
-    */
-    
-    ivec3 id = ivec3(gl_GlobalInvocationID);
-    if (any(greaterThanEqual(id, ivec3(BOUNDS))))
-    {
-        return;
-    }
-    imageStore(outCells, id, uvec4(1));
+    value = max(0, value);
+    imageStore(outCells, id, uvec4(value));
 }

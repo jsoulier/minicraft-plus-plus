@@ -7,14 +7,18 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #include "config.hpp"
 #include "shader.hpp"
 
 static_assert(BOUNDS < 1024);
+static_assert(FRAMES == 2, "not implemented");
 
 static SDL_Window* window;
 static SDL_GPUDevice* device;
@@ -30,13 +34,19 @@ static int depthTextureWidth;
 static int depthTextureHeight;
 static float pitch;
 static float yaw;
-static float distance{500.0f};
+static float distance{256.0f};
+static uint64_t time1;
+static uint64_t time2;
+static float delta;
+static float delay{100.0f};
+static bool imguiFocused;
 
 struct
 {
-    uint32_t survival{4};
-    uint32_t birth{4};
-    uint32_t state{5};
+    uint32_t seed{0};
+    uint32_t surviveMask{4};
+    uint32_t birthMask{4};
+    uint32_t life{5};
     uint32_t neighborhood{MOORE};
     uint32_t frame{0};
 }
@@ -315,6 +325,82 @@ static bool CreateResources()
     return true;
 }
 
+static void DrawImGui()
+{
+    ImGui_ImplSDLGPU3_NewFrame();
+    ImGui::NewFrame();
+    ImGui::Begin("Settings");
+    imguiFocused = ImGui::IsWindowFocused();
+    if (ImGui::Button("Reset"))
+    {
+        rules.seed = std::rand() % RAND_MAX;
+        rules.frame = 0;
+    }
+    ImGui::SliderFloat("Speed", &delay, 0.0f, 1000.0f);
+    ImGui::Text("Survive");
+    for (int i = 1; i < 27; i++)
+    {
+        bool bit = (rules.surviveMask >> i) & 1;
+        if (i % 7 == 0)
+        {
+            ImGui::NewLine();
+        }
+        ImGui::PushID(i);
+        if (ImGui::Checkbox("", &bit))
+        {
+            if (bit)
+            {
+                rules.surviveMask |= (1 << i);
+            }
+            else
+            {
+                rules.surviveMask &= ~(1 << i);
+            }
+        }
+        ImGui::SameLine();
+        ImGui::Text("%02d", i);
+        ImGui::SameLine();
+        ImGui::PopID();
+    }
+    ImGui::NewLine();
+    ImGui::Text("Birth");
+    for (int i = 1; i < 27; i++)
+    {
+        bool bit = (rules.birthMask >> i) & 1;
+        if (i % 7 == 0)
+        {
+            ImGui::NewLine();
+        }
+        ImGui::PushID(32 + i);
+        if (ImGui::Checkbox("", &bit))
+        {
+            if (bit)
+            {
+                rules.birthMask |= (1 << i);
+            }
+            else
+            {
+                rules.birthMask &= ~(1 << i);
+            }
+        }
+        ImGui::SameLine();
+        ImGui::Text("%02d", i);
+        ImGui::SameLine();
+        ImGui::PopID();
+    }
+    ImGui::NewLine();
+    int life = rules.life;
+    int neighborhood = rules.neighborhood;
+    ImGui::SliderInt("Life", &life, 1, 64);
+    ImGui::Text("Neighborhood");
+    ImGui::RadioButton("Moore", &neighborhood, 0);
+    ImGui::RadioButton("Von Neumann", &neighborhood, 1);
+    rules.life = life;
+    rules.neighborhood = neighborhood;
+    ImGui::End();
+    ImGui::Render();
+}
+
 static void Draw()
 {
     SDL_WaitForGPUSwapchain(device, window);
@@ -376,28 +462,9 @@ static void Draw()
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize.x = width;
     io.DisplaySize.y = height;
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui::NewFrame();
-    ImGui::Render();
+    DrawImGui();
     ImDrawData* drawData = ImGui::GetDrawData();
     ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commandBuffer);
-    {
-        SDL_GPUStorageTextureReadWriteBinding textureBinding{};
-        textureBinding.texture = textures[writeFrame];
-        SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &textureBinding, 1, nullptr, 0);
-        if (!computePass)
-        {
-            SDL_Log("Failed to begin compute pass: %s", SDL_GetError());
-            SDL_SubmitGPUCommandBuffer(commandBuffer);
-            return;
-        }
-        SDL_BindGPUComputePipeline(computePass, computePipeline);
-        SDL_PushGPUComputeUniformData(commandBuffer, 0, &rules, sizeof(rules));
-        SDL_BindGPUComputeStorageTextures(computePass, 0, &textures[readFrame], 1);
-        int groups = (BOUNDS + THREADS - 1) / THREADS;
-        SDL_DispatchGPUCompute(computePass, groups, groups, groups);
-        SDL_EndGPUComputePass(computePass);
-    }
     {
         SDL_GPUColorTargetInfo colorInfo{};
         SDL_GPUDepthStencilTargetInfo depthInfo{};
@@ -446,6 +513,35 @@ static void Draw()
     SDL_SubmitGPUCommandBuffer(commandBuffer);
 }
 
+static void Simulate()
+{
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(device);
+    if (!commandBuffer)
+    {
+        SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+        return;
+    }
+    SDL_GPUStorageTextureReadWriteBinding textureBinding{};
+    textureBinding.texture = textures[writeFrame];
+    SDL_GPUComputePass* computePass = SDL_BeginGPUComputePass(commandBuffer, &textureBinding, 1, nullptr, 0);
+    if (!computePass)
+    {
+        SDL_Log("Failed to begin compute pass: %s", SDL_GetError());
+        SDL_SubmitGPUCommandBuffer(commandBuffer);
+        return;
+    }
+    SDL_BindGPUComputePipeline(computePass, computePipeline);
+    SDL_PushGPUComputeUniformData(commandBuffer, 0, &rules, sizeof(rules));
+    SDL_BindGPUComputeStorageTextures(computePass, 0, &textures[readFrame], 1);
+    int groups = (BOUNDS + THREADS - 1) / THREADS;
+    SDL_DispatchGPUCompute(computePass, groups, groups, groups);
+    SDL_EndGPUComputePass(computePass);
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
+    readFrame = (readFrame + 1) % FRAMES;
+    writeFrame = (writeFrame + 1) % FRAMES;
+    rules.frame++;
+}
+
 int main(int argc, char** argv)
 {
     if (!Init())
@@ -463,9 +559,14 @@ int main(int argc, char** argv)
         SDL_Log("Failed to create resources");
         return 1;
     }
+    std::srand(std::time(nullptr));
+    rules.seed = std::rand() % RAND_MAX;
     bool running = true;
     while (running)
     {
+        time2 = SDL_GetTicks();
+        delta += time2 - time1;
+        time1 = time2;
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -476,14 +577,24 @@ int main(int argc, char** argv)
                 running = false;
                 break;
             case SDL_EVENT_MOUSE_MOTION:
-                if (event.motion.state & SDL_BUTTON_LMASK)
+                if (!imguiFocused && event.motion.state & SDL_BUTTON_LMASK)
                 {
                     yaw += event.motion.xrel * PAN;
                     pitch -= event.motion.yrel * PAN;
+                    float clamp = glm::pi<float>() / 2.0f - 0.01f;
+                    pitch = std::clamp(pitch, -clamp, clamp);
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
                 distance -= event.wheel.y * ZOOM;
+                distance = std::max(1.0f, distance);
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (event.key.scancode == SDL_SCANCODE_R)
+                {
+                    rules.seed = std::rand() % RAND_MAX;
+                    rules.frame = 0;
+                }
                 break;
             }
         }
@@ -492,9 +603,12 @@ int main(int argc, char** argv)
             break;
         }
         Draw();
-        readFrame = (readFrame + 1) % FRAMES;
-        writeFrame = (writeFrame + 1) % FRAMES;
-        rules.frame++;
+        if (delta < delay)
+        {
+            continue;
+        }
+        delta = 0.0f;
+        Simulate();
     }
     for (int i = 0; i < FRAMES; i++)
     {
