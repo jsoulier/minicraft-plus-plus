@@ -1,5 +1,40 @@
 # 3D Cellular Automata
 
+![](image.png)
+
+3D Cellular Automata simulation using SDL3 GPU with compute shaders
+
+#### Windows
+
+Install the [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/) for glslc
+
+```bash
+git clone https://github.com/jsoulier/3d_cellular_automata --recurse-submodules
+cd 3d_cellular_automata
+mkdir build
+cd build
+cmake ..
+cmake --build . --parallel 8 --config Release
+cd bin
+./automata.exe
+```
+
+#### Linux
+
+```bash
+sudo apt install glslc
+```
+
+```bash
+git clone https://github.com/jsoulier/3d_cellular_automata --recurse-submodules
+cd 3d_cellular_automata
+mkdir build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . --parallel 8
+cd bin
+./automata
+```
 
 # References
 

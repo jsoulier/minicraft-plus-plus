@@ -3,6 +3,16 @@
 
 using namespace metal;
 
+struct uniformRules
+{
+    uint seed;
+    uint surviveMask;
+    uint birthMask;
+    uint life;
+    uint neighborhood;
+    uint frame;
+};
+
 struct main0_out
 {
     float4 outColor [[color(0)]];
@@ -10,17 +20,15 @@ struct main0_out
 
 struct main0_in
 {
-    int3 inInstance [[user(locn0)]];
+    uint inValue [[user(locn0)]];
 };
 
-fragment main0_out main0(main0_in in [[stage_in]])
+fragment main0_out main0(main0_in in [[stage_in]], constant uniformRules& _27 [[buffer(0)]])
 {
     main0_out out = {};
-    float distance1 = 110.85124969482421875;
-    float distance2 = distance(float3(in.inInstance), float3(64.0));
     float3 color1 = float3(1.0, 1.0, 0.0);
     float3 color2 = float3(1.0, 0.0, 1.0);
-    out.outColor = float4(mix(color1, color2, float3(distance2 / distance1)), 1.0);
+    out.outColor = float4(mix(color1, color2, float3(float(in.inValue) / float(_27.life))), 1.0);
     return out;
 }
 

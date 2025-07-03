@@ -492,6 +492,7 @@ static void Draw()
         SDL_BindGPUVertexBuffers(renderPass, 0, vertexBuffers, 2);
         SDL_BindGPUVertexStorageTextures(renderPass, 0, &textures[writeFrame], 1);
         SDL_PushGPUVertexUniformData(commandBuffer, 0, &viewProjMatrix, sizeof(viewProjMatrix));
+        SDL_PushGPUFragmentUniformData(commandBuffer, 0, &rules, sizeof(rules));
         SDL_DrawGPUPrimitives(renderPass, 36, BOUNDS * BOUNDS * BOUNDS, 0, 0);
         SDL_EndGPURenderPass(renderPass);
     }
@@ -586,8 +587,11 @@ int main(int argc, char** argv)
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                distance -= event.wheel.y * ZOOM;
-                distance = std::max(1.0f, distance);
+                // if (!imguiFocused)
+                {
+                    distance -= event.wheel.y * ZOOM;
+                    distance = std::max(1.0f, distance);
+                }
                 break;
             case SDL_EVENT_KEY_DOWN:
                 if (event.key.scancode == SDL_SCANCODE_R)

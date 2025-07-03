@@ -10,7 +10,7 @@ struct uniformViewProjMatrix
 
 struct main0_out
 {
-    int3 outInstance [[user(locn0)]];
+    uint outValue [[user(locn0)]];
     float4 gl_Position [[position]];
 };
 
@@ -20,15 +20,17 @@ struct main0_in
     uint inInstance [[attribute(1)]];
 };
 
-vertex main0_out main0(main0_in in [[stage_in]], constant uniformViewProjMatrix& _57 [[buffer(0)]], texture3d<uint> cells [[texture(0)]])
+vertex main0_out main0(main0_in in [[stage_in]], constant uniformViewProjMatrix& _60 [[buffer(0)]], texture3d<uint> cells [[texture(0)]])
 {
     main0_out out = {};
-    out.outInstance.x = int((in.inInstance >> uint(0)) & 1023u);
-    out.outInstance.y = int((in.inInstance >> uint(10)) & 1023u);
-    out.outInstance.z = int((in.inInstance >> uint(20)) & 1023u);
-    if (cells.read(uint3(out.outInstance)).x > 0u)
+    int3 instance;
+    instance.x = int((in.inInstance >> uint(0)) & 1023u);
+    instance.y = int((in.inInstance >> uint(10)) & 1023u);
+    instance.z = int((in.inInstance >> uint(20)) & 1023u);
+    out.outValue = cells.read(uint3(instance)).x;
+    if (out.outValue > 0u)
     {
-        out.gl_Position = _57.viewProjMatrix * float4(in.inPosition + float3(out.outInstance), 1.0);
+        out.gl_Position = _60.viewProjMatrix * float4(in.inPosition + float3(instance), 1.0);
     }
     else
     {
