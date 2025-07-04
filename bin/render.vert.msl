@@ -34,7 +34,7 @@ vertex main0_out main0(main0_in in [[stage_in]], constant uniformViewProjMatrix&
     }
     else
     {
-        out.gl_Position = float4(0.0, 0.0, 0.0, 1.0);
+        out.gl_Position = float4(0.0, 0.0, 2.0, 1.0);
     }
     return out;
 }

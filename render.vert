@@ -22,6 +22,6 @@ void main()
     }
     else
     {
-        gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gl_Position = vec4(0.0f, 0.0f, 2.0f, 1.0f);
     }
 }

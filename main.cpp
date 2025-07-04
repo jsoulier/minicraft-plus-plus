@@ -38,15 +38,15 @@ static float distance{256.0f};
 static uint64_t time1;
 static uint64_t time2;
 static float delta;
-static float delay{100.0f};
+static float delay{10.0f};
 static bool imguiFocused;
 
 struct
 {
     uint32_t seed{0};
-    uint32_t surviveMask{4};
-    uint32_t birthMask{4};
-    uint32_t life{5};
+    uint32_t surviveMask{16};
+    uint32_t birthMask{96};
+    uint32_t life{32};
     uint32_t neighborhood{MOORE};
     uint32_t frame{0};
 }
