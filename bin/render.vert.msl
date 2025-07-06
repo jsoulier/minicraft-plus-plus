@@ -20,17 +20,17 @@ struct main0_in
     uint inInstance [[attribute(1)]];
 };
 
-vertex main0_out main0(main0_in in [[stage_in]], constant uniformViewProjMatrix& _60 [[buffer(0)]], texture3d<uint> cells [[texture(0)]])
+vertex main0_out main0(main0_in in [[stage_in]], constant uniformViewProjMatrix& _62 [[buffer(0)]], texture3d<uint> cells [[texture(0)]], sampler cellsSmplr [[sampler(0)]])
 {
     main0_out out = {};
     int3 instance;
     instance.x = int((in.inInstance >> uint(0)) & 1023u);
     instance.y = int((in.inInstance >> uint(10)) & 1023u);
     instance.z = int((in.inInstance >> uint(20)) & 1023u);
-    out.outValue = cells.read(uint3(instance)).x;
+    out.outValue = cells.read(uint3(instance), 0).x;
     if (out.outValue > 0u)
     {
-        out.gl_Position = _60.viewProjMatrix * float4(in.inPosition + float3(instance), 1.0);
+        out.gl_Position = _62.viewProjMatrix * float4(in.inPosition + float3(instance), 1.0);
     }
     else
     {

@@ -25,6 +25,7 @@ static SDL_GPUDevice* device;
 static SDL_GPUGraphicsPipeline* graphicsPipeline;
 static SDL_GPUComputePipeline* computePipeline;
 static SDL_GPUTexture* textures[FRAMES];
+static SDL_GPUSampler* sampler;
 static int readFrame{0};
 static int writeFrame{1};
 static SDL_GPUBuffer* vertexBuffer;
@@ -68,7 +69,9 @@ static bool Init()
         return false;
     }
 #if defined(SDL_PLATFORM_WIN32)
-    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL, true, nullptr);
+    // TODO:
+    // device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL, true, nullptr);
+    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
 #elif defined(SDL_PLATFORM_APPLE)
     device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, true, nullptr);
 #else
@@ -322,6 +325,15 @@ static bool CreateResources()
     }
     SDL_EndGPUCopyPass(copyPass);
     SDL_SubmitGPUCommandBuffer(commandBuffer);
+    {
+        SDL_GPUSamplerCreateInfo info{};
+        sampler = SDL_CreateGPUSampler(device, &info);
+        if (!sampler)
+        {
+            SDL_Log("Failed to create sampler: %s", SDL_GetError());
+            return false;
+        }
+    }
     return true;
 }
 
@@ -489,8 +501,11 @@ static void Draw()
         vertexBuffers[0].buffer = vertexBuffer;
         vertexBuffers[1].buffer = instanceBuffer;
         /* TODO: read or write, which is better? */
+        SDL_GPUTextureSamplerBinding textureSampler{};
+        textureSampler.sampler = sampler;
+        textureSampler.texture = textures[readFrame];
         SDL_BindGPUVertexBuffers(renderPass, 0, vertexBuffers, 2);
-        SDL_BindGPUVertexStorageTextures(renderPass, 0, &textures[writeFrame], 1);
+        SDL_BindGPUVertexSamplers(renderPass, 0, &textureSampler, 1);
         SDL_PushGPUVertexUniformData(commandBuffer, 0, &viewProjMatrix, sizeof(viewProjMatrix));
         SDL_PushGPUFragmentUniformData(commandBuffer, 0, &rules, sizeof(rules));
         SDL_DrawGPUPrimitives(renderPass, 36, BOUNDS * BOUNDS * BOUNDS, 0, 0);
@@ -531,10 +546,13 @@ static void Simulate()
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return;
     }
+    SDL_GPUTextureSamplerBinding textureSampler{};
+    textureSampler.sampler = sampler;
+    textureSampler.texture = textures[readFrame];
+    int groups = (BOUNDS + THREADS - 1) / THREADS;
     SDL_BindGPUComputePipeline(computePass, computePipeline);
     SDL_PushGPUComputeUniformData(commandBuffer, 0, &rules, sizeof(rules));
-    SDL_BindGPUComputeStorageTextures(computePass, 0, &textures[readFrame], 1);
-    int groups = (BOUNDS + THREADS - 1) / THREADS;
+    SDL_BindGPUComputeSamplers(computePass, 0, &textureSampler, 1);
     SDL_DispatchGPUCompute(computePass, groups, groups, groups);
     SDL_EndGPUComputePass(computePass);
     SDL_SubmitGPUCommandBuffer(commandBuffer);
@@ -618,6 +636,7 @@ int main(int argc, char** argv)
     {
         SDL_ReleaseGPUTexture(device, textures[i]);
     }
+    SDL_ReleaseGPUSampler(device, sampler);
     SDL_ReleaseGPUTexture(device, depthTexture);
     SDL_ReleaseGPUBuffer(device, vertexBuffer);
     SDL_ReleaseGPUBuffer(device, instanceBuffer);

@@ -3,7 +3,7 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in uint inInstance;
 layout(location = 0) out flat uint outValue;
-layout(set = 0, binding = 0, r8ui) uniform readonly uimage3D cells;
+layout(set = 0, binding = 0) uniform usampler3D cells;
 layout(set = 1, binding = 0) uniform uniformViewProjMatrix
 {
     mat4 viewProjMatrix;
@@ -15,7 +15,7 @@ void main()
     instance.x = int((inInstance >>  0) & 0x3FF);
     instance.y = int((inInstance >> 10) & 0x3FF);
     instance.z = int((inInstance >> 20) & 0x3FF);
-    outValue = imageLoad(cells, instance).x;
+    outValue = texelFetch(cells, instance, 0).x;
     if (outValue > 0)
     {
         gl_Position = viewProjMatrix * vec4(inPosition + vec3(instance), 1.0f);

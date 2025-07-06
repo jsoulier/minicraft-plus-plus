@@ -4,7 +4,7 @@
 #include "config.hpp"
 
 layout(local_size_x = THREADS, local_size_y = THREADS, local_size_z = THREADS) in;
-layout(set = 0, binding = 0, r8ui) uniform readonly uimage3D inCells;
+layout(set = 0, binding = 0) uniform usampler3D inCells;
 layout(set = 1, binding = 0, r8ui) uniform writeonly uimage3D outCells;
 layout(set = 2, binding = 0) uniform uniformRules
 {
@@ -56,7 +56,7 @@ void main()
     }
     if (frame == 1)
     {
-        int value = int(imageLoad(inCells, id).x);
+        int value = int(texelFetch(inCells, id, 0).x);
         imageStore(outCells, id, uvec4(value));
         return;
     }
@@ -71,7 +71,7 @@ void main()
             {
                 continue;
             }
-            neighbors += uint(imageLoad(inCells, neighborId).x > 0);
+            neighbors += uint(texelFetch(inCells, neighborId, 0).x > 0);
         }
         break;
     case VON_NEUMANN:
@@ -82,11 +82,11 @@ void main()
             {
                 continue;
             }
-            neighbors += uint(imageLoad(inCells, neighborId).x > 0);
+            neighbors += uint(texelFetch(inCells, neighborId, 0).x > 0);
         }
         break;
     }
-    int value = int(imageLoad(inCells, id).x);
+    int value = int(texelFetch(inCells, id, 0).x);
     if (value == 0 && ((birthMask & (1u << neighbors)) != 0))
     {
         value = int(life);

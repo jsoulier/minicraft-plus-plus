@@ -78,6 +78,10 @@ function(add_shader FILE)
     else()
         package(${SPV})
     endif()
+
+    # TODO:
+    package(${SPV})
+
     package(${JSON})
 endfunction()
 add_shader(automata.comp config.hpp)
