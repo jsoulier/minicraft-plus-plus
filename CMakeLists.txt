@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(automata)
+project(3d_cellular_automata)
 
 set(BINARY_DIR ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_DIR})
@@ -13,7 +13,7 @@ make_directory(${BINARY_DIR})
 set(GLM_BUILD_LIBRARY FALSE)
 add_subdirectory(SDL)
 add_subdirectory(glm)
-add_executable(automata WIN32
+add_executable(3d_cellular_automata WIN32
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
     imgui/imgui_draw.cpp
@@ -24,9 +24,9 @@ add_executable(automata WIN32
     main.cpp
     shader.cpp
 )
-set_target_properties(automata PROPERTIES CXX_STANDARD 23)
-target_include_directories(automata PRIVATE imgui)
-target_link_libraries(automata PRIVATE SDL3::SDL3 glm)
+set_target_properties(3d_cellular_automata PROPERTIES CXX_STANDARD 23)
+target_include_directories(3d_cellular_automata PRIVATE imgui)
+target_link_libraries(3d_cellular_automata PRIVATE SDL3::SDL3 glm)
 
 function(add_shader FILE)
     set(DEPENDS ${ARGN})
@@ -47,7 +47,7 @@ function(add_shader FILE)
         string(REPLACE . _ NAME ${NAME})
         set(NAME compile_${NAME})
         add_custom_target(${NAME} DEPENDS ${OUTPUT})
-        add_dependencies(automata ${NAME})
+        add_dependencies(3d_cellular_automata ${NAME})
     endfunction()
     if (MSVC)
         set(SHADERCROSS SDL_shadercross/msvc/shadercross.exe)
@@ -69,7 +69,7 @@ function(add_shader FILE)
         string(REPLACE . _ NAME ${NAME})
         set(NAME package_${NAME})
         add_custom_target(${NAME} DEPENDS ${BINARY})
-        add_dependencies(automata ${NAME})
+        add_dependencies(3d_cellular_automata ${NAME})
     endfunction()
     if(WIN32)
         package(${DXIL})

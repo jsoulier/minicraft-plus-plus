@@ -18,7 +18,7 @@ cd build
 cmake ..
 cmake --build . --parallel 8 --config Release
 cd bin
-./automata.exe
+./3d_cellular_automata.exe
 ```
 
 #### Linux
@@ -31,7 +31,7 @@ cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . --parallel 8
 cd bin
-./automata
+./3d_cellular_automata
 ```
 
 ### References

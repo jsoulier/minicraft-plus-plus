@@ -5,7 +5,7 @@
             "name": "win32",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/automata.exe",
+            "program": "${workspaceFolder}/build/bin/3d_cellular_automata.exe",
             "cwd": "${workspaceFolder}/build/bin",
             "preLaunchTask": "CMake: build"
         },
